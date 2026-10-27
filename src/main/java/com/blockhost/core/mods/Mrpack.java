@@ -24,8 +24,8 @@ import java.util.zip.ZipFile;
 public final class Mrpack {
 
     /** Hosts de descarga que admite el formato; cualquier otro se rechaza. */
-    private static final Set<String> ALLOWED_HOSTS =
-            Set.of("cdn.modrinth.com", "github.com", "raw.githubusercontent.com", "gitlab.com");
+    private static final Set<String> ALLOWED_HOSTS = Set.of("cdn.modrinth.com", "github.com",
+            "raw.githubusercontent.com", "gitlab.com", "edge.forgecdn.net", "mediafilez.forgecdn.net");
 
     /** Claves de "dependencies" del índice -> loader. */
     private static final Map<String, String> LOADERS = Map.of(
@@ -40,8 +40,15 @@ public final class Mrpack {
         public boolean forServer() { return !"unsupported".equals(serverEnv); }
     }
 
+    /**
+     * Un modpack ya leído (de Modrinth o de CurseForge, que se convierte a este mismo formato).
+     *
+     * @param overrideDirs carpetas del archivo que se copian tal cual sobre el servidor, en orden
+     * @param unavailable  ficheros que no se pueden descargar automáticamente (el autor no lo permite)
+     */
     public record Pack(String name, String versionId, String summary, String mcVersion,
-                       Map<String, String> dependencies, List<PackFile> files) {
+                       Map<String, String> dependencies, List<PackFile> files,
+                       List<String> overrideDirs, List<String> unavailable) {
 
         /** "fabric", "quilt", "forge", "neoforge" o null si es vanilla. */
         public String loader() {
@@ -59,6 +66,17 @@ public final class Mrpack {
         public List<PackFile> serverFiles() { return files.stream().filter(PackFile::forServer).toList(); }
 
         public String title() { return versionId == null ? name : name + " " + versionId; }
+    }
+
+    /** Lee un modpack de Modrinth (.mrpack) o de CurseForge (.zip con manifest.json). */
+    public static Pack readAny(Path archive) throws Exception {
+        try (ZipFile zip = new ZipFile(archive.toFile())) {
+            if (zip.getEntry("modrinth.index.json") != null) return read(archive);
+            if (zip.getEntry("manifest.json") != null) return CurseForgePack.read(archive);
+        } catch (java.util.zip.ZipException e) {
+            throw new IOException("El archivo no es un modpack válido");
+        }
+        throw new IOException("No es un modpack de Modrinth (.mrpack) ni de CurseForge (.zip con manifest.json)");
     }
 
     public static Pack read(Path mrpack) throws IOException {
@@ -97,7 +115,8 @@ public final class Mrpack {
                         env == null ? "required" : env));
             }
         }
-        return new Pack(Json.str(m.get("name")), Json.str(m.get("versionId")), Json.str(m.get("summary")), mc, deps, files);
+        return new Pack(Json.str(m.get("name")), Json.str(m.get("versionId")), Json.str(m.get("summary")), mc, deps, files,
+                List.of("overrides", "server-overrides"), List.of());
     }
 
     /** Descarga a staging los ficheros del pack que van en el servidor, comprobando ruta, host y huella de cada uno. */
@@ -116,10 +135,11 @@ public final class Mrpack {
         }
     }
 
-    /** Copia overrides/ y luego server-overrides/ (que tiene prioridad) del .mrpack sobre dest. */
-    static void extractOverrides(Path mrpack, Path dest) throws IOException {
-        try (ZipFile zip = new ZipFile(mrpack.toFile())) {
-            for (String prefix : List.of("overrides/", "server-overrides/")) {
+    /** Copia las carpetas de overrides del pack sobre dest (en Modrinth, server-overrides/ tiene prioridad). */
+    static void extractOverrides(Pack pack, Path archive, Path dest) throws IOException {
+        try (ZipFile zip = new ZipFile(archive.toFile())) {
+            for (String dir : pack.overrideDirs()) {
+                String prefix = dir.endsWith("/") ? dir : dir + "/";
                 for (ZipEntry e : java.util.Collections.list(zip.entries())) {
                     if (!e.getName().startsWith(prefix) || e.isDirectory()) continue;
                     String rel = e.getName().substring(prefix.length());
@@ -134,9 +154,10 @@ public final class Mrpack {
         }
     }
 
-    /** Descarga el .mrpack de una versión de Modrinth a la caché y lo verifica. */
-    public static Path download(Modrinth.Version v, ProgressListener p) throws Exception {
+    /** Descarga el archivo de una versión de modpack (Modrinth o CurseForge) a la caché y lo verifica. */
+    public static Path download(ModRepository.Version v, ProgressListener p) throws Exception {
         if (v.file() == null) throw new IOException("Esa versión del modpack no tiene archivo");
+        if (v.file().url() == null) throw new IOException("El autor de este modpack no permite descargarlo desde otras apps");
         Path dir = Files.createDirectories(AppPaths.cache().resolve("modpacks"));
         Path target = safeResolve(dir, v.file().fileName());
         Http.download(v.file().url(), target, "Modpack " + v.file().fileName(), p);

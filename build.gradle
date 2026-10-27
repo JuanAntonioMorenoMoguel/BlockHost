@@ -21,6 +21,21 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// Clave de API de CurseForge incrustada en la app (opcional): -PcurseforgeApiKey=... o la variable
+// BLOCKHOST_CURSEFORGE_API_KEY al compilar. Sin ella, cada usuario puede pegar la suya en la app.
+def curseforgeKey = (findProperty('curseforgeApiKey') ?: System.getenv('BLOCKHOST_CURSEFORGE_API_KEY'))?.toString()?.trim()
+def generatedResources = layout.buildDirectory.dir('generated/resources/curseforge')
+def curseforgeKeyTask = tasks.register('curseforgeKey') {
+    inputs.property('keyHash', curseforgeKey ? curseforgeKey.digest('SHA-256') : '')
+    outputs.dir(generatedResources)
+    doLast {
+        def out = generatedResources.get().file('com/blockhost/curseforge.key').asFile
+        out.parentFile.mkdirs()
+        if (curseforgeKey) out.text = curseforgeKey else out.delete()
+    }
+}
+sourceSets.main.resources.srcDir(files(generatedResources).builtBy(curseforgeKeyTask))
+
 test {
     useJUnitPlatform()
     // Los datos de la app (caché, servidores) van a build/ y no a la carpeta real del usuario.
@@ -56,8 +71,27 @@ runtime {
         imageName = 'BlockHost'
         installerName = 'BlockHost'
         appVersion = project.version
+        // Sin --win-console: BlockHost.exe abre solo la ventana de la app, sin consola detrás.
+        if (OperatingSystem.current().isWindows()) {
+            imageOptions += ['--icon', file('packaging/icon.ico').path]
+        } else if (OperatingSystem.current().isLinux()) {
+            imageOptions += ['--icon', file('packaging/icon.png').path]
+        }
         if (OperatingSystem.current().isWindows()) {
             installerOptions += ['--win-dir-chooser', '--win-menu', '--win-shortcut', '--win-per-user-install']
         }
+    }
+}
+
+// ./gradlew app  ->  build/jpackage/BlockHost/ con BlockHost.exe: se abre con doble clic, sin consola
+// y sin necesitar Java instalado. Esa carpeta se puede copiar a donde quieras.
+tasks.register('app') {
+    group = 'distribution'
+    description = 'Genera la app portable (BlockHost.exe en Windows) sin consola.'
+    dependsOn 'jpackageImage'
+    doLast {
+        def dir = layout.buildDirectory.dir('jpackage/BlockHost').get().asFile
+        def exe = OperatingSystem.current().isWindows() ? new File(dir, 'BlockHost.exe') : dir
+        println "\nApp lista: ${exe}\nÁbrela con doble clic (puedes anclarla a la barra de tareas o crear un acceso directo)."
     }
 }

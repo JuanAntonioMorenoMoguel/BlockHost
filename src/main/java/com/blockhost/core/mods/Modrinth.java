@@ -11,43 +11,22 @@ import java.util.List;
 import java.util.Map;
 
 /** Cliente mínimo de la API v2 de Modrinth (https://docs.modrinth.com/api). No necesita clave. */
-public final class Modrinth {
+public final class Modrinth implements ModRepository {
 
+    public static final Modrinth INSTANCE = new Modrinth();
     private static final String API = "https://api.modrinth.com/v2";
 
     private Modrinth() { }
 
-    public record Project(String id, String slug, String title, String description, String author, long downloads,
-                          String projectType, String clientSide, String serverSide, List<String> gameVersions) {
+    @Override public String id() { return "modrinth"; }
 
-        /** El servidor no lo carga: solo tiene sentido en el juego de cada jugador. */
-        public boolean clientOnly() { return "unsupported".equals(serverSide); }
+    @Override public String displayName() { return "Modrinth"; }
 
-        public String url() { return "https://modrinth.com/" + projectType + "/" + slug; }
+    @Override public boolean available() { return true; }
 
-        @Override
-        public String toString() { return title; }
-    }
-
-    public record File(String url, String fileName, String sha1, String sha512, long size) { }
-
-    public record Dependency(String projectId, String versionId, String type) { }
-
-    public record Version(String id, String projectId, String name, String versionNumber, String versionType,
-                          List<String> gameVersions, List<String> loaders, List<Dependency> dependencies, File file) {
-
-        public List<Dependency> dependencies(String type) {
-            return dependencies.stream().filter(d -> type.equals(d.type())).toList();
-        }
-    }
-
-    // ---------------- consultas ----------------
-
-    /**
-     * Busca mods o modpacks compatibles con el loader y la versión de Minecraft (null = cualquiera).
-     * Los mods que solo funcionan en el cliente se excluyen: en un servidor no sirven.
-     */
-    public static List<Project> search(String query, String projectType, String loader, String mcVersion, int limit)
+    /** Los mods que solo funcionan en el cliente se excluyen: en un servidor no sirven. */
+    @Override
+    public List<Project> search(String query, String projectType, String loader, String mcVersion, int limit)
             throws Exception {
         List<List<String>> facets = new ArrayList<>();
         facets.add(List.of("project_type:" + projectType));
@@ -62,14 +41,14 @@ public final class Modrinth {
         return out;
     }
 
-    /** Proyecto por id o slug; null si no existe. */
-    public static Project project(String idOrSlug) throws Exception {
+    @Override
+    public Project project(String idOrSlug) throws Exception {
         Object o = Http.getJsonOrNull(API + "/project/" + enc(idOrSlug));
         return o == null ? null : project(Json.obj(o));
     }
 
-    /** Versiones del proyecto para ese loader y versión de Minecraft (null = todas), de más nueva a más antigua. */
-    public static List<Version> versions(String idOrSlug, String loader, String mcVersion) throws Exception {
+    @Override
+    public List<Version> versions(String idOrSlug, String loader, String mcVersion) throws Exception {
         StringBuilder url = new StringBuilder(API + "/project/" + enc(idOrSlug) + "/version?");
         if (loader != null) url.append("loaders=").append(enc("[\"" + loader + "\"]")).append('&');
         if (mcVersion != null) url.append("game_versions=").append(enc("[\"" + mcVersion + "\"]"));
@@ -80,13 +59,14 @@ public final class Modrinth {
         return out;
     }
 
-    public static Version version(String versionId) throws Exception {
+    @Override
+    public Version version(String projectId, String versionId) throws Exception {
         Object o = Http.getJsonOrNull(API + "/version/" + enc(versionId));
         return o == null ? null : version(Json.obj(o));
     }
 
     /** Identifica ficheros por su SHA-1: sha1 -> versión de Modrinth (los que no son de Modrinth no salen). */
-    public static Map<String, Version> versionsByHash(List<String> sha1s) throws Exception {
+    public Map<String, Version> versionsByHash(List<String> sha1s) throws Exception {
         Map<String, Version> out = new LinkedHashMap<>();
         if (sha1s.isEmpty()) return out;
         Map<String, Object> body = new LinkedHashMap<>();
@@ -97,20 +77,18 @@ public final class Modrinth {
         return out;
     }
 
-    /** La más reciente de tipo release; si no hay ninguna, la más reciente (beta/alpha). */
-    public static Version best(List<Version> versions) {
-        for (Version v : versions) if ("release".equals(v.versionType())) return v;
-        return versions.isEmpty() ? null : versions.get(0);
-    }
-
     // ---------------- parseo ----------------
 
     static Project project(Map<String, Object> m) {
         String id = Json.str(m.containsKey("project_id") ? m.get("project_id") : m.get("id"));
-        Object versions = m.containsKey("game_versions") ? m.get("game_versions") : m.get("versions");
-        return new Project(id, Json.str(m.get("slug")), Json.str(m.get("title")), Json.str(m.get("description")),
-                Json.str(m.get("author")), Json.num(m.get("downloads"), 0), Json.str(m.get("project_type")),
-                Json.str(m.get("client_side")), Json.str(m.get("server_side")), strings(versions));
+        String type = Json.str(m.get("project_type"));
+        String slug = Json.str(m.get("slug"));
+        String icon = Json.str(m.get("icon_url"));
+        return new Project("modrinth", id, slug, Json.str(m.get("title")), Json.str(m.get("description")),
+                Json.str(m.get("author")), Json.num(m.get("downloads"), 0), type,
+                "unsupported".equals(Json.str(m.get("server_side"))), "required".equals(Json.str(m.get("client_side"))),
+                icon == null || icon.isBlank() ? null : icon,
+                "https://modrinth.com/" + (type == null ? "project" : type) + "/" + (slug != null ? slug : id));
     }
 
     static Version version(Map<String, Object> m) {
@@ -132,7 +110,7 @@ public final class Modrinth {
                 if (primary == null || Json.bool(f.get("primary"), false)) primary = file;
             }
         }
-        return new Version(Json.str(m.get("id")), Json.str(m.get("project_id")), Json.str(m.get("name")),
+        return new Version("modrinth", Json.str(m.get("id")), Json.str(m.get("project_id")),
                 Json.str(m.get("version_number")), Json.str(m.get("version_type")),
                 strings(m.get("game_versions")), strings(m.get("loaders")), deps, primary);
     }

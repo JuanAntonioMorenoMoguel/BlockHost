@@ -27,38 +27,49 @@ public final class Http {
 
     private Http() { }
 
-    private static HttpRequest request(String url) {
-        return HttpRequest.newBuilder(URI.create(url))
+    private static HttpRequest request(String url, String... headers) {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
                 .header("User-Agent", USER_AGENT)
                 .timeout(Duration.ofMinutes(5))
-                .GET()
-                .build();
+                .GET();
+        if (headers.length > 0) b.headers(headers);
+        return b.build();
     }
 
-    public static Object getJson(String url) throws IOException, InterruptedException {
-        HttpResponse<String> r = CLIENT.send(request(url), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        if (r.statusCode() != 200) throw new IOException("HTTP " + r.statusCode() + " al consultar " + url);
-        return Json.parse(r.body());
+    /** @param headers pares nombre, valor (p. ej. la clave de una API) */
+    public static Object getJson(String url, String... headers) throws IOException, InterruptedException {
+        Object o = getJsonOrNull(url, headers);
+        if (o == null) throw new IOException("HTTP 404 al consultar " + url);
+        return o;
     }
 
     /** Como getJson, pero un 404 devuelve null en vez de fallar. */
-    public static Object getJsonOrNull(String url) throws IOException, InterruptedException {
-        HttpResponse<String> r = CLIENT.send(request(url), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    public static Object getJsonOrNull(String url, String... headers) throws IOException, InterruptedException {
+        HttpResponse<String> r = CLIENT.send(request(url, headers), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (r.statusCode() == 404) return null;
-        if (r.statusCode() != 200) throw new IOException("HTTP " + r.statusCode() + " al consultar " + url);
+        check(r, url);
         return Json.parse(r.body());
     }
 
-    public static Object postJson(String url, Object body) throws IOException, InterruptedException {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+    public static Object postJson(String url, Object body, String... headers) throws IOException, InterruptedException {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
                 .header("User-Agent", USER_AGENT)
                 .header("Content-Type", "application/json")
                 .timeout(Duration.ofMinutes(2))
-                .POST(HttpRequest.BodyPublishers.ofString(Json.write(body), StandardCharsets.UTF_8))
-                .build();
-        HttpResponse<String> r = CLIENT.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        if (r.statusCode() != 200) throw new IOException("HTTP " + r.statusCode() + " al consultar " + url);
+                .POST(HttpRequest.BodyPublishers.ofString(Json.write(body), StandardCharsets.UTF_8));
+        if (headers.length > 0) b.headers(headers);
+        HttpResponse<String> r = CLIENT.send(b.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        check(r, url);
         return Json.parse(r.body());
+    }
+
+    private static void check(HttpResponse<String> r, String url) throws IOException {
+        if (r.statusCode() == 200) return;
+        if (r.statusCode() == 401 || r.statusCode() == 403) {
+            throw new IOException("Acceso denegado (HTTP " + r.statusCode() + ") al consultar " + URI.create(url).getHost()
+                    + ". Si es CurseForge, revisa la clave de API.");
+        }
+        throw new IOException("HTTP " + r.statusCode() + " al consultar " + url);
     }
 
     /** Descarga a un fichero temporal y lo mueve al destino al terminar (nunca deja ficheros a medias). */
