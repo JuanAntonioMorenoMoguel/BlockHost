@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Mods de un servidor Fabric: listar, activar/desactivar, quitar, añadir .jar propios, instalar desde Modrinth o CurseForge
+ * Mods de un servidor Fabric: listar, activar/desactivar, quitar, añadir .jar propios, instalar desde Modrinth
  * resolviendo dependencias, e instalar modpacks .mrpack. Todo lo nuevo se descarga primero a una carpeta
  * temporal y se comprueba su compatibilidad antes de tocar la carpeta mods.
  */
@@ -226,7 +226,7 @@ public final class ModManager {
         }
     }
 
-    // ---------------- Modrinth / CurseForge ----------------
+    // ---------------- Modrinth ----------------
 
     /**
      * Qué hay que descargar para instalar un proyecto: la versión más reciente compatible con este Minecraft
@@ -284,7 +284,7 @@ public final class ModManager {
                 continue;
             }
             if (v.file().url() == null) {
-                problems.add(project.title() + who + ": su autor no deja descargarlo desde otras apps. Bájalo de "
+                problems.add(project.title() + who + " no tiene enlace de descarga. Bájalo de "
                         + project.pageUrl() + " y añádelo con «Añadir .jar».");
                 continue;
             }
@@ -375,7 +375,7 @@ public final class ModManager {
 
     /**
      * Instala el modpack: descarga sus mods de servidor, pone la versión de Fabric Loader que pide y
-     * aplica sus overrides. Sirve para .mrpack y para modpacks de CurseForge. Los mods que hubiera se apartan a una carpeta "mods-antes-de-..." por si acaso.
+     * aplica sus overrides. Los mods que hubiera se apartan a una carpeta "mods-antes-de-..." por si acaso.
      *
      * @return problemas de compatibilidad tras instalarlo
      */
@@ -436,13 +436,7 @@ public final class ModManager {
             JavaRuntimeManager.deleteRecursively(staging);
         }
         p.onProgress("Modpack instalado", 1);
-        List<Issue> issues = new ArrayList<>();
-        for (String u : pack.unavailable()) {
-            issues.add(new Issue(CompatibilityChecker.Severity.ERROR, u, null, "No se pudo descargar automáticamente: "
-                    + "su autor solo permite bajarlo desde CurseForge. Descárgalo y añádelo con «Añadir .jar».", null));
-        }
-        issues.addAll(check());
-        return issues;
+        return check();
     }
 
     // ---------------- utilidades ----------------

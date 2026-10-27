@@ -9,6 +9,7 @@ import com.blockhost.core.ServerType;
 import com.blockhost.core.SystemInfo;
 import com.blockhost.core.mods.ModManager;
 import com.blockhost.core.mods.ModRepository;
+import com.blockhost.core.mods.Modrinth;
 import com.blockhost.core.mods.Mrpack;
 import javafx.application.HostServices;
 import javafx.application.Platform;
@@ -51,7 +52,7 @@ public final class ModpackServerDialog extends Stage {
     private final Consumer<ServerInstance> onCreated;
 
     private final Label packLabel = new Label("Elige un modpack para empezar.");
-    private final Button fromModrinth = new Button("Buscar modpack (Modrinth o CurseForge)...");
+    private final Button fromModrinth = new Button("Buscar modpack en Modrinth...");
     private final Button fromFile = new Button("Elegir archivo...");
     private final TextField nameField = new TextField();
     private final Slider ramSlider = new Slider();
@@ -142,13 +143,13 @@ public final class ModpackServerDialog extends Stage {
         UiTasks.run(() -> {
             try {
                 ModRepository.Version v = ModRepository.best(
-                        ModRepository.byId(project.repo()).versions(project.id(), ModManager.LOADER, null));
+                        Modrinth.INSTANCE.versions(project.id(), ModManager.LOADER, null));
                 if (v == null) throw new IllegalStateException(project.title() + " no tiene versiones para Fabric.");
                 Path file = Mrpack.download(v, (msg, f) -> Platform.runLater(() -> {
                     progressLabel.setText(msg);
                     progressBar.setProgress(f < 0 ? ProgressBar.INDETERMINATE_PROGRESS : f);
                 }));
-                Mrpack.Pack p = Mrpack.readAny(file);
+                Mrpack.Pack p = Mrpack.read(file);
                 Platform.runLater(() -> { setWorking(false, null); setPack(p, file); });
             } catch (Exception ex) {
                 Platform.runLater(() -> { setWorking(false, null); errorLabel.setText(ex.getMessage()); });
@@ -160,13 +161,13 @@ public final class ModpackServerDialog extends Stage {
         FileChooser fc = new FileChooser();
         fc.setTitle("Elige un modpack");
         fc.getExtensionFilters().add(new FileChooser.ExtensionFilter(
-                "Modpack de Modrinth o CurseForge (*.mrpack, *.zip)", "*.mrpack", "*.zip"));
+                "Modpack de Modrinth (*.mrpack)", "*.mrpack"));
         File f = fc.showOpenDialog(this);
         if (f == null) return;
         setWorking(true, "Leyendo el modpack...");
         UiTasks.run(() -> {
             try {
-                Mrpack.Pack p = Mrpack.readAny(f.toPath());
+                Mrpack.Pack p = Mrpack.read(f.toPath());
                 Platform.runLater(() -> { setWorking(false, null); setPack(p, f.toPath()); });
             } catch (Exception ex) {
                 Platform.runLater(() -> {
@@ -189,9 +190,7 @@ public final class ModpackServerDialog extends Stage {
         pack = p;
         packFile = file;
         packLabel.setText(p.title() + "\nMinecraft " + p.mcVersion() + " · Fabric Loader " + p.loaderVersion()
-                + " · " + p.serverFiles().size() + " archivos para el servidor"
-                + (p.unavailable().isEmpty() ? "" : "\n⚠ " + p.unavailable().size()
-                + " mods no se pueden descargar automáticamente (su autor no lo permite): tendrás que añadirlos a mano."));
+                + " · " + p.serverFiles().size() + " archivos para el servidor");
         if (nameField.getText().isBlank()) nameField.setText(p.name());
         installBtn.setDisable(false);
     }

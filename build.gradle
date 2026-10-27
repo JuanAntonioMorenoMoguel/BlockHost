@@ -21,21 +21,6 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-// Clave de API de CurseForge incrustada en la app (opcional): -PcurseforgeApiKey=... o la variable
-// BLOCKHOST_CURSEFORGE_API_KEY al compilar. Sin ella, cada usuario puede pegar la suya en la app.
-def curseforgeKey = (findProperty('curseforgeApiKey') ?: System.getenv('BLOCKHOST_CURSEFORGE_API_KEY'))?.toString()?.trim()
-def generatedResources = layout.buildDirectory.dir('generated/resources/curseforge')
-def curseforgeKeyTask = tasks.register('curseforgeKey') {
-    inputs.property('keyHash', curseforgeKey ? curseforgeKey.digest('SHA-256') : '')
-    outputs.dir(generatedResources)
-    doLast {
-        def out = generatedResources.get().file('com/blockhost/curseforge.key').asFile
-        out.parentFile.mkdirs()
-        if (curseforgeKey) out.text = curseforgeKey else out.delete()
-    }
-}
-sourceSets.main.resources.srcDir(files(generatedResources).builtBy(curseforgeKeyTask))
-
 test {
     useJUnitPlatform()
     // Los datos de la app (caché, servidores) van a build/ y no a la carpeta real del usuario.

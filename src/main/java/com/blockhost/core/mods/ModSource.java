@@ -6,9 +6,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Origen de un mod instalado desde Modrinth, CurseForge o un modpack. Se guarda en blockhost-mods.json.
+ * Origen de un mod instalado desde Modrinth o un modpack. Se guarda en blockhost-mods.json.
  *
- * @param repo "modrinth" o "curseforge" (null si vino de un modpack sin más datos)
+ * @param repo "modrinth" (null si vino de un modpack sin más datos)
  */
 public record ModSource(String repo, String projectId, String versionId, String title, String via) {
 
@@ -35,14 +35,12 @@ public record ModSource(String repo, String projectId, String versionId, String 
     /** Página web del proyecto, si se sabe. */
     public String pageUrl() {
         if (projectId == null) return null;
-        if ("curseforge".equals(repo)) return "https://www.curseforge.com/projects/" + projectId;
         if ("modrinth".equals(repo)) return "https://modrinth.com/project/" + projectId;
         return null;
     }
 
     public String label() {
         if (fromModpack()) return "Modpack";
-        if ("curseforge".equals(repo)) return "CurseForge";
         if ("modrinth".equals(repo)) return "Modrinth";
         return "?";
     }

@@ -2,7 +2,9 @@ package com.blockhost.ui;
 
 import atlantafx.base.theme.PrimerDark;
 import atlantafx.base.theme.Styles;
+import com.blockhost.core.DesktopShortcut;
 import com.blockhost.core.ServerInstance;
+import com.blockhost.core.Settings;
 import com.blockhost.core.ServerRegistry;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -12,6 +14,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.layout.BorderPane;
@@ -58,6 +61,12 @@ public class App extends Application {
         VBox.setVgrow(serverList, Priority.ALWAYS);
 
         VBox sidebar = new VBox(10, title, subtitle, serverList, add, fromPack);
+        if (DesktopShortcut.supported()) {
+            Hyperlink shortcut = new Hyperlink("Crear acceso directo en el escritorio");
+            shortcut.getStyleClass().add(Styles.TEXT_SMALL);
+            shortcut.setOnAction(e -> createShortcut(true));
+            sidebar.getChildren().add(shortcut);
+        }
         sidebar.setPadding(new Insets(16));
         sidebar.setPrefWidth(240);
 
@@ -73,6 +82,7 @@ public class App extends Application {
         stage.setMinWidth(900);
         stage.setMinHeight(560);
         stage.setOnCloseRequest(this::onClose);
+        if (DesktopShortcut.supported() && Settings.get(DesktopShortcut.SETTING) == null) createShortcut(false);
         stage.show();
     }
 
@@ -110,6 +120,31 @@ public class App extends Application {
         box.setAlignment(Pos.CENTER);
         box.setMaxWidth(460);
         return box;
+    }
+
+    /**
+     * Al primer arranque de la app instalada se crea solo; luego, solo si el usuario lo pide
+     * (si lo borró, no se le vuelve a poner).
+     */
+    private void createShortcut(boolean askedByUser) {
+        Thread t = new Thread(() -> {
+            try {
+                Path lnk = DesktopShortcut.create();
+                Settings.set(DesktopShortcut.SETTING, "true");
+                if (askedByUser) Platform.runLater(() -> UiTasks.info(stage, "Acceso directo creado", lnk.toString()));
+            } catch (Exception ex) {
+                try {
+                    Settings.set(DesktopShortcut.SETTING, "false");
+                } catch (Exception ignored) {
+                    // se reintentará en el próximo arranque
+                }
+                if (askedByUser) {
+                    Platform.runLater(() -> UiTasks.error(stage, "No se pudo crear el acceso directo", ex.getMessage()));
+                }
+            }
+        }, "desktop-shortcut");
+        t.setDaemon(true);
+        t.start();
     }
 
     private void openWizard() {

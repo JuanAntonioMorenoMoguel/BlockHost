@@ -65,7 +65,7 @@ class MrpackTest {
     void onlyWhitelistedHosts() {
         assertTrue(Mrpack.allowedUrl("https://cdn.modrinth.com/data/a/b.jar"));
         assertTrue(Mrpack.allowedUrl("https://github.com/a/b/releases/download/c.jar"));
-        assertTrue(Mrpack.allowedUrl("https://edge.forgecdn.net/files/1/2/c.jar"));
+        assertFalse(Mrpack.allowedUrl("https://edge.forgecdn.net/files/1/2/c.jar"));
         assertFalse(Mrpack.allowedUrl("http://cdn.modrinth.com/data/a/b.jar"));
         assertFalse(Mrpack.allowedUrl("https://evil.example/b.jar"));
         assertFalse(Mrpack.allowedUrl("no es una url"));

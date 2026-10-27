@@ -22,8 +22,6 @@ public final class Modrinth implements ModRepository {
 
     @Override public String displayName() { return "Modrinth"; }
 
-    @Override public boolean available() { return true; }
-
     /** Los mods que solo funcionan en el cliente se excluyen: en un servidor no sirven. */
     @Override
     public List<Project> search(String query, String projectType, String loader, String mcVersion, int limit)
