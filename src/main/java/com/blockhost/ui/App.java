@@ -49,12 +49,15 @@ public class App extends Application {
         add.getStyleClass().add(Styles.ACCENT);
         add.setMaxWidth(Double.MAX_VALUE);
         add.setOnAction(e -> openWizard());
+        Button fromPack = new Button("+ Desde modpack");
+        fromPack.setMaxWidth(Double.MAX_VALUE);
+        fromPack.setOnAction(e -> new ModpackServerDialog(stage, getHostServices(), inst -> refresh(inst.dir())).show());
 
         serverList.setPlaceholder(new Label("Aún no hay servidores"));
         serverList.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> show(sel));
         VBox.setVgrow(serverList, Priority.ALWAYS);
 
-        VBox sidebar = new VBox(10, title, subtitle, serverList, add);
+        VBox sidebar = new VBox(10, title, subtitle, serverList, add, fromPack);
         sidebar.setPadding(new Insets(16));
         sidebar.setPrefWidth(240);
 

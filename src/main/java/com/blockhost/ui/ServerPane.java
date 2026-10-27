@@ -8,6 +8,8 @@ import com.blockhost.core.ServerInstance;
 import com.blockhost.core.ServerProcess;
 import com.blockhost.core.ServerProcess.Status;
 import com.blockhost.core.SystemInfo;
+import com.blockhost.core.mods.CompatibilityChecker;
+import com.blockhost.core.mods.ModManager;
 import com.blockhost.core.providers.MojangMeta;
 import javafx.application.HostServices;
 import javafx.application.Platform;
@@ -16,6 +18,8 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
@@ -34,7 +38,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Panel de un servidor: estado, controles, consola en vivo y jugadores conectados. */
+/** Panel de un servidor: estado, controles, consola en vivo, jugadores conectados y (en Fabric) mods. */
 public final class ServerPane extends BorderPane {
 
     private static final int CONSOLE_MAX_CHARS = 400_000;
@@ -53,6 +57,7 @@ public final class ServerPane extends BorderPane {
     private final Button sendBtn = new Button("Enviar");
     private final Label playersTitle = new Label("Jugadores (0)");
     private final ListView<String> playersList = new ListView<>();
+    private final ModsPane modsPane;
 
     // La consola recibe líneas desde un hilo de fondo: se agrupan para no saturar el hilo de JavaFX.
     private final ConcurrentLinkedQueue<String> pending = new ConcurrentLinkedQueue<>();
@@ -62,10 +67,10 @@ public final class ServerPane extends BorderPane {
         this.instance = instance;
         this.host = host;
         this.process = new ServerProcess(instance);
+        this.modsPane = instance.config().type().supportsMods() ? new ModsPane(instance, host) : null;
 
         setTop(buildHeader());
-        setCenter(buildConsole());
-        setRight(buildPlayers());
+        setCenter(buildCenter());
         setPadding(new Insets(16));
 
         process.onOutput(this::appendLine);
@@ -114,11 +119,26 @@ public final class ServerPane extends BorderPane {
         return header;
     }
 
+    /** Consola y jugadores; en servidores con mods, además una pestaña para gestionarlos. */
+    private javafx.scene.Node buildCenter() {
+        BorderPane consoleTab = new BorderPane(buildConsole());
+        consoleTab.setRight(buildPlayers());
+        if (modsPane == null) return consoleTab;
+
+        consoleTab.setPadding(new Insets(12, 0, 0, 0));
+        modsPane.setPadding(new Insets(12, 0, 0, 0));
+        Tab console = new Tab("Consola", consoleTab);
+        Tab mods = new Tab("Mods", modsPane);
+        TabPane tabs = new TabPane(console, mods);
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        return tabs;
+    }
+
     private Label connectionInfo(ServerConfig c) {
         List<String> ips = SystemInfo.localIPv4();
         String lan = ips.isEmpty() ? "—" : String.join(", ", ips.stream().map(ip -> ip + ":" + c.port()).toList());
         String extra = c.type().supportsMods()
-                ? "\nMods: copia los .jar en la carpeta «mods» (los jugadores necesitan los mismos)."
+                ? "\nMods: gestiónalos en la pestaña «Mods» (los jugadores necesitan los mismos)."
                 : c.type().supportsPlugins() ? "\nPlugins: copia los .jar en la carpeta «plugins»." : "";
         Label l = new Label("Desde este PC: localhost:" + c.port()
                 + "    ·    Desde tu red (Wi-Fi/cable): " + lan
@@ -166,12 +186,28 @@ public final class ServerPane extends BorderPane {
                     return;
                 }
                 ensureJava();
+                warnAboutMods();
                 process.start();
             } catch (Exception ex) {
                 appendLine("[BlockHost] No se pudo iniciar: " + ex.getMessage());
                 Platform.runLater(() -> updateStatus(process.status()));
             }
         });
+    }
+
+    /** No impide arrancar (el usuario puede saber más que la comprobación), pero avisa en la consola. */
+    private void warnAboutMods() {
+        if (modsPane == null) return;
+        try {
+            long errors = new ModManager(instance).check().stream()
+                    .filter(i -> i.severity() == CompatibilityChecker.Severity.ERROR).count();
+            if (errors > 0) {
+                appendLine("[BlockHost] Aviso: hay " + errors + " problema(s) de compatibilidad entre mods. "
+                        + "Si el servidor no arranca, revisa la pestaña «Mods».");
+            }
+        } catch (IOException ignored) {
+            // si no se pueden leer los mods, que lo diga Fabric al arrancar
+        }
     }
 
     /** Si el Java del servidor se borró, se vuelve a descargar antes de arrancar. */
@@ -236,6 +272,7 @@ public final class ServerPane extends BorderPane {
         stopBtn.setDisable(!alive || s == Status.STOPPING);
         input.setDisable(!alive);
         sendBtn.setDisable(!alive);
+        if (modsPane != null) modsPane.setServerRunning(alive);
     }
 
     private void updatePlayers(Set<String> players) {
