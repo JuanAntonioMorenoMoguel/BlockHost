@@ -105,7 +105,7 @@ public final class JavaRuntimeManager {
         if (proc.waitFor() != 0) throw new IOException("Error al extraer Java: " + output);
     }
 
-    static void deleteRecursively(Path p) throws IOException {
+    public static void deleteRecursively(Path p) throws IOException {
         if (!Files.exists(p)) return;
         try (Stream<Path> s = Files.walk(p)) {
             for (Path f : s.sorted((a, b) -> b.getNameCount() - a.getNameCount()).toList()) Files.delete(f);

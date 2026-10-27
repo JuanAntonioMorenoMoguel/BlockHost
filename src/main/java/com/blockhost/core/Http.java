@@ -16,8 +16,9 @@ import java.time.Duration;
 /** Peticiones HTTP: JSON y descargas con progreso. */
 public final class Http {
 
-    // PaperMC (Fill v3) exige un User-Agent identificable.
-    public static final String USER_AGENT = "BlockHost/0.1 (gestor de servidores de Minecraft)";
+    // PaperMC (Fill v3) y Modrinth exigen un User-Agent que identifique la app.
+    public static final String USER_AGENT =
+            "BlockHost/0.1 (+https://github.com/JuanAntonioMorenoMoguel/BlockHost; gestor de servidores de Minecraft)";
 
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.ALWAYS)
@@ -36,6 +37,26 @@ public final class Http {
 
     public static Object getJson(String url) throws IOException, InterruptedException {
         HttpResponse<String> r = CLIENT.send(request(url), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (r.statusCode() != 200) throw new IOException("HTTP " + r.statusCode() + " al consultar " + url);
+        return Json.parse(r.body());
+    }
+
+    /** Como getJson, pero un 404 devuelve null en vez de fallar. */
+    public static Object getJsonOrNull(String url) throws IOException, InterruptedException {
+        HttpResponse<String> r = CLIENT.send(request(url), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (r.statusCode() == 404) return null;
+        if (r.statusCode() != 200) throw new IOException("HTTP " + r.statusCode() + " al consultar " + url);
+        return Json.parse(r.body());
+    }
+
+    public static Object postJson(String url, Object body) throws IOException, InterruptedException {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                .header("User-Agent", USER_AGENT)
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofMinutes(2))
+                .POST(HttpRequest.BodyPublishers.ofString(Json.write(body), StandardCharsets.UTF_8))
+                .build();
+        HttpResponse<String> r = CLIENT.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (r.statusCode() != 200) throw new IOException("HTTP " + r.statusCode() + " al consultar " + url);
         return Json.parse(r.body());
     }
