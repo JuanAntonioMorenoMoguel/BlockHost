@@ -8,6 +8,8 @@ import com.blockhost.core.mods.CompatibilityChecker.Issue;
 import com.blockhost.core.mods.InstallPlan;
 import com.blockhost.core.mods.InstalledMod;
 import com.blockhost.core.mods.ModManager;
+import com.blockhost.core.mods.ModMetadata;
+import com.blockhost.core.mods.ModRepository;
 import com.blockhost.core.mods.Modrinth;
 import com.blockhost.core.mods.Mrpack;
 import javafx.application.HostServices;
@@ -23,7 +25,9 @@ import javafx.scene.control.MenuItem;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
+import javafx.scene.Node;
 import javafx.scene.control.TableView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -35,6 +39,7 @@ import javafx.stage.Window;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -54,7 +59,7 @@ final class ModsPane extends VBox {
     private final TableView<InstalledMod> table = new TableView<>();
     private final Button toggleBtn = new Button("Desactivar");
     private final Button removeBtn = new Button("Quitar");
-    private final Button pageBtn = new Button("Ver en Modrinth");
+    private final Button pageBtn = new Button("Ver página del mod");
     private final Label issuesTitle = new Label("Compatibilidad");
     private final ListView<Issue> issuesList = new ListView<>();
     private final Button fixBtn = new Button("Instalar lo que falta desde Modrinth");
@@ -65,6 +70,7 @@ final class ModsPane extends VBox {
     private boolean serverRunning = false;
     private boolean busy = false;
     private List<String> missing = List.of();
+    private Map<String, byte[]> iconBytes = Map.of();
 
     ModsPane(ServerInstance instance, HostServices host) {
         super(10);
@@ -77,13 +83,14 @@ final class ModsPane extends VBox {
         lockedLabel.getStyleClass().addAll(Styles.WARNING, Styles.TEXT_SMALL);
 
         String mc = instance.config().mcVersion();
-        MenuItem searchMod = new MenuItem("Buscar mod en Modrinth...");
-        searchMod.setOnAction(e -> new ModrinthDialog(window(), host, "mod", mc, p -> installFromModrinth(List.of(p.id()))).show());
+        MenuItem searchMod = new MenuItem("Buscar mods (Modrinth o CurseForge)...");
+        searchMod.setOnAction(e -> new ModSearchDialog(window(), host, "mod", mc,
+                p -> install(ModRepository.byId(p.repo()), List.of(p.id()))).show());
         MenuItem localJar = new MenuItem("Añadir .jar desde tu PC...");
         localJar.setOnAction(e -> addLocalJars());
-        MenuItem packModrinth = new MenuItem("Instalar modpack de Modrinth...");
-        packModrinth.setOnAction(e -> new ModrinthDialog(window(), host, "modpack", mc, this::modpackFromModrinth).show());
-        MenuItem packFile = new MenuItem("Instalar modpack desde archivo .mrpack...");
+        MenuItem packModrinth = new MenuItem("Buscar modpacks (Modrinth o CurseForge)...");
+        packModrinth.setOnAction(e -> new ModSearchDialog(window(), host, "modpack", mc, this::modpackFromRepository).show());
+        MenuItem packFile = new MenuItem("Instalar modpack desde archivo (.mrpack o .zip de CurseForge)...");
         packFile.setOnAction(e -> modpackFromFile());
         addMenu.getItems().addAll(searchMod, localJar, new SeparatorMenuItem(), packModrinth, packFile);
         addMenu.getStyleClass().add(Styles.ACCENT);
@@ -99,8 +106,8 @@ final class ModsPane extends VBox {
         removeBtn.setOnAction(e -> removeSelected());
         pageBtn.setOnAction(e -> {
             InstalledMod m = table.getSelectionModel().getSelectedItem();
-            if (m != null && m.source() != null && m.source().projectId() != null) {
-                host.showDocument("https://modrinth.com/project/" + m.source().projectId());
+            if (m != null && m.source() != null && m.source().pageUrl() != null) {
+                host.showDocument(m.source().pageUrl());
             }
         });
         HBox rowButtons = new HBox(8, toggleBtn, removeBtn, pageBtn);
@@ -110,7 +117,7 @@ final class ModsPane extends VBox {
         issuesList.setPrefHeight(160);
         issuesList.setMinHeight(130);
         issuesList.setPlaceholder(new Label("✔ Todo compatible"));
-        fixBtn.setOnAction(e -> installFromModrinth(missing));
+        fixBtn.setOnAction(e -> install(Modrinth.INSTANCE, missing));
 
         progress.setPrefWidth(160);
         progressLabel.getStyleClass().add(Styles.TEXT_SMALL);
@@ -133,13 +140,25 @@ final class ModsPane extends VBox {
     // ---------------- construcción ----------------
 
     private void buildTable() {
-        table.getColumns().add(column("", 34, m -> m.enabled() ? "✔" : "—"));
-        table.getColumns().add(column("Mod", 230, InstalledMod::displayName));
+        TableColumn<InstalledMod, InstalledMod> iconCol = new TableColumn<>("");
+        iconCol.setCellValueFactory(d -> new javafx.beans.property.ReadOnlyObjectWrapper<>(d.getValue()));
+        iconCol.setCellFactory(c -> new TableCell<>() {
+            @Override
+            protected void updateItem(InstalledMod m, boolean empty) {
+                super.updateItem(m, empty);
+                setGraphic(empty || m == null ? null : icon(m));
+            }
+        });
+        iconCol.setPrefWidth(44);
+        iconCol.setSortable(false);
+        table.getColumns().add(iconCol);
+        table.getColumns().add(column("Activo", 60, m -> m.enabled() ? "✔" : "—"));
+        table.getColumns().add(column("Mod", 210, InstalledMod::displayName));
         table.getColumns().add(column("Versión", 140, InstalledMod::version));
-        table.getColumns().add(column("Origen", 150, m -> m.source() == null ? "Añadido a mano"
-                : m.source().via() != null && m.source().via().startsWith("modpack:") ? "Modpack" : "Modrinth"));
-        table.getColumns().add(column("Archivo", 220, InstalledMod::fileName));
-        table.setPlaceholder(new Label("Sin mods. Pulsa «+ Añadir» para buscarlos en Modrinth o instalar un modpack."));
+        table.getColumns().add(column("Origen", 140, m -> m.source() == null ? "Añadido a mano" : m.source().label()));
+        table.getColumns().add(column("Archivo", 200, InstalledMod::fileName));
+        table.setPlaceholder(new Label("Sin mods. Pulsa «+ Añadir» para buscarlos en Modrinth o CurseForge, o instalar un modpack."));
+        table.setFixedCellSize(40);
         table.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
         table.getSelectionModel().selectedItemProperty().addListener((o, a, b) -> updateControls());
     }
@@ -159,7 +178,14 @@ final class ModsPane extends VBox {
                 List<InstalledMod> list = mods.list();
                 List<Issue> issues = CompatibilityChecker.check(list, mods.environment());
                 Map<String, Object> pack = mods.modpackInfo();
-                Platform.runLater(() -> show(list, issues, pack));
+                Map<String, byte[]> icons = new HashMap<>();
+                for (InstalledMod m : list) {
+                    if (m.meta() != null) icons.put(m.jarName(), ModMetadata.readEntry(m.file(), m.meta().icon()));
+                }
+                Platform.runLater(() -> {
+                    iconBytes = icons;
+                    show(list, issues, pack);
+                });
             } catch (Exception ex) {
                 Platform.runLater(() -> progressLabel.setText("No se pudieron leer los mods: " + ex.getMessage()));
             }
@@ -191,12 +217,16 @@ final class ModsPane extends VBox {
         updateControls();
     }
 
-    private void installFromModrinth(List<String> projectIds) {
+    private Node icon(InstalledMod m) {
+        return Icons.fromBytes(iconBytes.get(m.jarName()), m.displayName(), 28);
+    }
+
+    private void install(ModRepository repo, List<String> projectIds) {
         if (projectIds.isEmpty()) return;
         startTask("Preparando la instalación...");
         UiTasks.run(() -> {
             try {
-                InstallPlan plan = mods.plan(projectIds, progressListener());
+                InstallPlan plan = mods.plan(repo, projectIds, progressListener());
                 if (plan.items().isEmpty()) {
                     finish(() -> UiTasks.error(window(), "No se puede instalar",
                             String.join("\n", plan.problems().isEmpty() ? List.of("No hay nada que instalar.") : plan.problems())));
@@ -297,12 +327,13 @@ final class ModsPane extends VBox {
 
     // ---------------- modpacks ----------------
 
-    private void modpackFromModrinth(Modrinth.Project project) {
+    private void modpackFromRepository(ModRepository.Project project) {
         startTask("Buscando versión de " + project.title() + " para Minecraft " + instance.config().mcVersion() + "...");
         UiTasks.run(() -> {
             try {
-                Modrinth.Version v = Modrinth.best(
-                        Modrinth.versions(project.id(), ModManager.LOADER, instance.config().mcVersion()));
+                ModRepository repo = ModRepository.byId(project.repo());
+                ModRepository.Version v = ModRepository.best(
+                        repo.versions(project.id(), ModManager.LOADER, instance.config().mcVersion()));
                 if (v == null) {
                     finish(() -> UiTasks.error(window(), "Modpack no compatible", project.title()
                             + " no tiene versión de Fabric para Minecraft " + instance.config().mcVersion()
@@ -310,7 +341,7 @@ final class ModsPane extends VBox {
                     return;
                 }
                 Path file = Mrpack.download(v, progressListener());
-                Mrpack.Pack pack = Mrpack.read(file);
+                Mrpack.Pack pack = Mrpack.readAny(file);
                 finish(() -> confirmModpack(pack, file));
             } catch (Exception ex) {
                 finish(() -> UiTasks.error(window(), "Error con el modpack", ex.getMessage()));
@@ -320,15 +351,20 @@ final class ModsPane extends VBox {
 
     private void modpackFromFile() {
         FileChooser fc = new FileChooser();
-        fc.setTitle("Elige un modpack de Modrinth");
-        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Modpack de Modrinth (*.mrpack)", "*.mrpack"));
+        fc.setTitle("Elige un modpack");
+        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+                "Modpack de Modrinth o CurseForge (*.mrpack, *.zip)", "*.mrpack", "*.zip"));
         File f = fc.showOpenDialog(window());
         if (f == null) return;
-        try {
-            confirmModpack(Mrpack.read(f.toPath()), f.toPath());
-        } catch (Exception ex) {
-            UiTasks.error(window(), "No se pudo leer el modpack", ex.getMessage());
-        }
+        startTask("Leyendo el modpack...");
+        UiTasks.run(() -> {
+            try {
+                Mrpack.Pack pack = Mrpack.readAny(f.toPath());
+                finish(() -> confirmModpack(pack, f.toPath()));
+            } catch (Exception ex) {
+                finish(() -> UiTasks.error(window(), "No se pudo leer el modpack", ex.getMessage()));
+            }
+        });
     }
 
     private void confirmModpack(Mrpack.Pack pack, Path file) {
@@ -341,6 +377,12 @@ final class ModsPane extends VBox {
         lines.add("Minecraft " + pack.mcVersion() + " · Fabric Loader " + pack.loaderVersion());
         lines.add(pack.serverFiles().size() + " archivos para el servidor ("
                 + (pack.files().size() - pack.serverFiles().size()) + " son solo para los jugadores y se omiten).");
+        if (!pack.unavailable().isEmpty()) {
+            lines.add("");
+            lines.add("Sus autores no dejan descargar estos automáticamente (tendrás que bajarlos de CurseForge "
+                    + "y añadirlos con «Añadir .jar»):");
+            pack.unavailable().forEach(u -> lines.add("  • " + u));
+        }
         if (!table.getItems().isEmpty()) {
             lines.add("");
             lines.add("Tus " + table.getItems().size() + " mods actuales se moverán a una carpeta «mods-antes-de-...» "
@@ -356,8 +398,10 @@ final class ModsPane extends VBox {
                 List<Issue> issues = mods.installModpack(pack, file, progressListener());
                 finish(() -> {
                     if (CompatibilityChecker.hasErrors(issues)) {
-                        UiTasks.info(window(), "Modpack instalado con avisos",
-                                "Revisa la lista de compatibilidad: hay problemas que pueden impedir el arranque.");
+                        StringBuilder b = new StringBuilder("Hay problemas que pueden impedir el arranque:\n\n");
+                        issues.stream().filter(i -> i.severity() == CompatibilityChecker.Severity.ERROR)
+                                .forEach(i -> b.append(i).append('\n'));
+                        UiTasks.info(window(), "Modpack instalado con avisos", b.toString().strip());
                     }
                     refresh();
                 });
@@ -408,7 +452,7 @@ final class ModsPane extends VBox {
         toggleBtn.setDisable(locked || sel == null);
         toggleBtn.setText(sel != null && !sel.enabled() ? "Activar" : "Desactivar");
         removeBtn.setDisable(locked || sel == null);
-        pageBtn.setDisable(sel == null || sel.source() == null || sel.source().projectId() == null);
+        pageBtn.setDisable(sel == null || sel.source() == null || sel.source().pageUrl() == null);
         fixBtn.setVisible(!missing.isEmpty());
         fixBtn.setManaged(!missing.isEmpty());
         fixBtn.setDisable(locked);

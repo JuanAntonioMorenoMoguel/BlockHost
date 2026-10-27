@@ -67,6 +67,8 @@ public class App extends Application {
         refresh(null);
 
         stage.setTitle("BlockHost");
+        var icon = App.class.getResourceAsStream("/com/blockhost/icon.png");
+        if (icon != null) stage.getIcons().add(new javafx.scene.image.Image(icon));
         stage.setScene(new Scene(root, 1150, 720));
         stage.setMinWidth(900);
         stage.setMinHeight(560);

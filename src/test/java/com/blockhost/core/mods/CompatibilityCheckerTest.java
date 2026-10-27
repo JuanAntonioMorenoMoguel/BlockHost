@@ -126,4 +126,15 @@ class CompatibilityCheckerTest {
         assertEquals(1, issues.size());
         assertFalse(issues.get(0).message().isBlank());
     }
+
+    @Test
+    void readsIconPath() throws IOException {
+        Path m = TestJars.jar(dir.resolve("icon.jar"), Map.of(
+                "fabric.mod.json", "{\"id\":\"x\",\"version\":\"1\",\"icon\":{\"16\":\"s.png\",\"64\":\"m.png\",\"512\":\"l.png\"}}",
+                "m.png", "PNG"));
+        ModMetadata meta = ModMetadata.read(m);
+        assertEquals("m.png", meta.icon());
+        assertEquals("PNG", new String(ModMetadata.readEntry(m, meta.icon())));
+        assertEquals(null, ModMetadata.readEntry(m, "no.png"));
+    }
 }

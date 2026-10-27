@@ -65,6 +65,7 @@ class MrpackTest {
     void onlyWhitelistedHosts() {
         assertTrue(Mrpack.allowedUrl("https://cdn.modrinth.com/data/a/b.jar"));
         assertTrue(Mrpack.allowedUrl("https://github.com/a/b/releases/download/c.jar"));
+        assertTrue(Mrpack.allowedUrl("https://edge.forgecdn.net/files/1/2/c.jar"));
         assertFalse(Mrpack.allowedUrl("http://cdn.modrinth.com/data/a/b.jar"));
         assertFalse(Mrpack.allowedUrl("https://evil.example/b.jar"));
         assertFalse(Mrpack.allowedUrl("no es una url"));
@@ -79,11 +80,12 @@ class MrpackTest {
         e.put("overrides/../../escape.txt", "x");
         Path f = TestJars.jar(dir.resolve("p.mrpack"), e);
         Path dest = Files.createDirectories(dir.resolve("srv"));
-        assertThrows(IOException.class, () -> Mrpack.extractOverrides(f, dest));
+        Mrpack.Pack pack = Mrpack.parse(INDEX);
+        assertThrows(IOException.class, () -> Mrpack.extractOverrides(pack, f, dest));
 
         e.remove("overrides/../../escape.txt");
         TestJars.jar(f, e);
-        Mrpack.extractOverrides(f, dest);
+        Mrpack.extractOverrides(pack, f, dest);
         assertEquals("servidor", Files.readString(dest.resolve("config/a.txt")));
     }
 }

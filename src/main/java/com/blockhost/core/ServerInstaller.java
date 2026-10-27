@@ -70,12 +70,13 @@ public final class ServerInstaller {
     }
 
     /**
-     * Crea un servidor Fabric con la versión de Minecraft y de Fabric Loader que fija el modpack y lo instala.
+     * Crea un servidor Fabric con la versión de Minecraft y de Fabric Loader que fija el modpack (Modrinth o
+     * CurseForge) y lo instala.
      * Del cfg se usan nombre, RAM, puerto y opciones de juego; tipo y versión los decide el pack.
      */
     public ServerInstance installFromModpack(ServerConfig cfg, Path mrpack, boolean eulaAccepted, ProgressListener p)
             throws Exception {
-        Mrpack.Pack pack = Mrpack.read(mrpack);
+        Mrpack.Pack pack = Mrpack.readAny(mrpack);
         if (!ModManager.LOADER.equals(pack.loader())) {
             throw new IllegalStateException("El modpack usa " + (pack.loader() == null ? "Minecraft sin mods" : pack.loader())
                     + " y BlockHost de momento solo instala modpacks de Fabric.");

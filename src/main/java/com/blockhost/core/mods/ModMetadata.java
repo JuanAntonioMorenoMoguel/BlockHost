@@ -30,7 +30,8 @@ public record ModMetadata(
         Map<String, List<String>> breaks,   // si está instalado en ese rango, el juego no arranca
         Map<String, List<String>> conflicts,// funciona, pero con problemas conocidos
         List<String> provides,              // alias que también cuenta como instalado
-        List<ModMetadata> nested            // jar-in-jar
+        List<ModMetadata> nested,           // jar-in-jar
+        String icon                         // ruta del icono dentro del .jar, o null
 ) {
 
     public enum Loader {
@@ -115,7 +116,8 @@ public record ModMetadata(
                 ranges(m.get("breaks")),
                 ranges(m.get("conflicts")),
                 m.get("provides") instanceof List<?> p ? p.stream().map(String::valueOf).toList() : List.of(),
-                nested);
+                nested,
+                icon(m.get("icon")));
     }
 
     private static Loader prefer(Loader current, Loader found) {
@@ -124,7 +126,41 @@ public record ModMetadata(
     }
 
     private static ModMetadata unknown(Loader loader) {
-        return new ModMetadata(loader, null, null, null, "*", Map.of(), Map.of(), Map.of(), List.of(), List.of());
+        return new ModMetadata(loader, null, null, null, "*", Map.of(), Map.of(), Map.of(), List.of(), List.of(), null);
+    }
+
+    /** "icon" puede ser una ruta o {"16": "...", "128": "..."}: se elige la mayor que no pase de 128 px. */
+    private static String icon(Object o) {
+        if (o instanceof String s) return s.isBlank() ? null : s;
+        if (!(o instanceof Map<?, ?> sizes)) return null;
+        String best = null;
+        int bestSize = -1;
+        for (Map.Entry<?, ?> e : sizes.entrySet()) {
+            int size;
+            try {
+                size = Integer.parseInt(String.valueOf(e.getKey()));
+            } catch (NumberFormatException ex) {
+                continue;
+            }
+            boolean better = bestSize < 0 || (size <= 128 ? size > bestSize || bestSize > 128 : size < bestSize && bestSize > 128);
+            if (better) { best = String.valueOf(e.getValue()); bestSize = size; }
+        }
+        return best;
+    }
+
+    /** Lee un fichero de dentro del .jar (p. ej. el icono). null si no existe o pesa demasiado. */
+    public static byte[] readEntry(Path jar, String name) {
+        if (name == null) return null;
+        String n = name.startsWith("/") ? name.substring(1) : name;
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(jar.toFile())) {
+            ZipEntry e = zip.getEntry(n);
+            if (e == null || e.getSize() > 1024 * 1024) return null;
+            try (InputStream in = zip.getInputStream(e)) {
+                return in.readAllBytes();
+            }
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     /** {"minecraft": "~1.21", "fabric-api": ["&gt;=0.100", "0.90.x"]} -> id -> lista de rangos. */

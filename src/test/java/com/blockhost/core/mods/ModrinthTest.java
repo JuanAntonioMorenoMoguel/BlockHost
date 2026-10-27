@@ -25,7 +25,7 @@ class ModrinthTest {
 
     @Test
     void parsesVersionAndPicksPrimaryFile() {
-        Modrinth.Version v = Modrinth.version(Json.obj(Json.parse(VERSION)));
+        ModRepository.Version v = Modrinth.version(Json.obj(Json.parse(VERSION)));
         assertEquals("a.jar", v.file().fileName());
         assertEquals("p1", v.file().sha1());
         assertEquals(1, v.dependencies("required").size());
@@ -34,27 +34,29 @@ class ModrinthTest {
 
     @Test
     void parsesSearchHitAndProject() {
-        Modrinth.Project hit = Modrinth.project(Json.obj(Json.parse("""
+        ModRepository.Project hit = Modrinth.project(Json.obj(Json.parse("""
                 {"project_id": "AANobbMI", "slug": "sodium", "title": "Sodium", "author": "jellysquid3",
-                 "project_type": "mod", "downloads": 100, "client_side": "required", "server_side": "unsupported",
+                 "project_type": "mod", "downloads": 100, "icon_url": "https://cdn.modrinth.com/i.png", "client_side": "required", "server_side": "unsupported",
                  "versions": ["1.21.4"]}""")));
         assertEquals("AANobbMI", hit.id());
         assertTrue(hit.clientOnly());
-        assertEquals("https://modrinth.com/mod/sodium", hit.url());
+        assertTrue(hit.clientToo());
+        assertEquals("https://modrinth.com/mod/sodium", hit.pageUrl());
+        assertEquals("modrinth", hit.repo());
 
-        Modrinth.Project p = Modrinth.project(Json.obj(Json.parse("""
+        ModRepository.Project p = Modrinth.project(Json.obj(Json.parse("""
                 {"id": "P7dR8mSH", "slug": "fabric-api", "title": "Fabric API", "project_type": "mod",
                  "client_side": "optional", "server_side": "optional", "game_versions": ["1.21.4"]}""")));
         assertEquals("P7dR8mSH", p.id());
-        assertEquals(List.of("1.21.4"), p.gameVersions());
+        assertEquals("https://modrinth.com/mod/fabric-api", p.pageUrl());
     }
 
     @Test
     void bestPrefersReleases() {
-        Modrinth.Version beta = Modrinth.version(Json.obj(Json.parse(VERSION.replace("\"release\"", "\"beta\""))));
-        Modrinth.Version rel = Modrinth.version(Json.obj(Json.parse(VERSION)));
-        assertEquals(rel, Modrinth.best(List.of(beta, rel)));
-        assertEquals(beta, Modrinth.best(List.of(beta)));
-        assertEquals(null, Modrinth.best(List.of()));
+        ModRepository.Version beta = Modrinth.version(Json.obj(Json.parse(VERSION.replace("\"release\"", "\"beta\""))));
+        ModRepository.Version rel = Modrinth.version(Json.obj(Json.parse(VERSION)));
+        assertEquals(rel, ModRepository.best(List.of(beta, rel)));
+        assertEquals(beta, ModRepository.best(List.of(beta)));
+        assertEquals(null, ModRepository.best(List.of()));
     }
 }

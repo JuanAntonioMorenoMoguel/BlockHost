@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Mods de un servidor Fabric: listar, activar/desactivar, quitar, añadir .jar propios, instalar desde Modrinth
+ * Mods de un servidor Fabric: listar, activar/desactivar, quitar, añadir .jar propios, instalar desde Modrinth o CurseForge
  * resolviendo dependencias, e instalar modpacks .mrpack. Todo lo nuevo se descarga primero a una carpeta
  * temporal y se comprueba su compatibilidad antes de tocar la carpeta mods.
  */
@@ -146,26 +146,47 @@ public final class ModManager {
         return evaluate(dir, files, List.of());
     }
 
-    /** Descarga a la carpeta temporal lo que indica el plan y comprueba la compatibilidad. */
+    /**
+     * Descarga a la carpeta temporal lo que indica el plan y comprueba la compatibilidad. Las dependencias que
+     * ya están instaladas con el mismo id de mod (p. ej. Fabric API bajada de otro sitio) no se duplican.
+     */
     public Staged stage(InstallPlan plan, ProgressListener p) throws Exception {
         Path dir = newStagingDir();
         List<StagedFile> files = new ArrayList<>();
+        List<String> notes = new ArrayList<>(plan.notes());
         try {
+            Set<String> installedIds = new HashSet<>();
+            for (InstalledMod m : list()) {
+                if (m.enabled() && m.meta() != null && m.meta().id() != null) installedIds.add(m.meta().id());
+            }
             int i = 0;
             for (InstallPlan.Item it : plan.items()) {
-                Modrinth.File f = it.version().file();
+                ModRepository.File f = it.version().file();
                 Path target = Mrpack.safeResolve(dir, f.fileName());
                 p.onProgress("Descargando " + it.project().title() + " (" + (++i) + "/" + plan.items().size() + ")", -1);
                 Http.download(f.url(), target, it.project().title(), p);
                 Hashes.verify(target, f.sha1(), f.sha512());
-                files.add(new StagedFile(target, new ModSource(it.project().id(), it.version().id(),
-                        it.project().title(), "modrinth")));
+                if (it.requiredBy() != null && installedIds.contains(modId(target))) {
+                    Files.delete(target);
+                    notes.add(it.project().title() + " (que pide " + it.requiredBy() + ") ya lo tienes instalado.");
+                    continue;
+                }
+                files.add(new StagedFile(target, new ModSource(it.project().repo(), it.project().id(), it.version().id(),
+                        it.project().title(), it.project().repo())));
             }
         } catch (Exception e) {
             JavaRuntimeManager.deleteRecursively(dir);
             throw e;
         }
-        return evaluate(dir, files, plan.notes());
+        return evaluate(dir, files, notes);
+    }
+
+    private static String modId(Path jar) {
+        try {
+            return ModMetadata.read(jar).id();
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private Staged evaluate(Path dir, List<StagedFile> files, List<String> notes) throws IOException {
@@ -205,21 +226,21 @@ public final class ModManager {
         }
     }
 
-    // ---------------- Modrinth ----------------
+    // ---------------- Modrinth / CurseForge ----------------
 
     /**
-     * Qué hay que descargar para instalar un proyecto de Modrinth: la versión más reciente compatible con
-     * este Minecraft y Fabric, más sus dependencias obligatorias (recursivamente) que no estén ya instaladas.
+     * Qué hay que descargar para instalar un proyecto: la versión más reciente compatible con este Minecraft
+     * y Fabric, más sus dependencias obligatorias (recursivamente) que no estén ya instaladas.
      */
-    public InstallPlan plan(String projectIdOrSlug, ProgressListener p) throws Exception {
-        return plan(List.of(projectIdOrSlug), p);
+    public InstallPlan plan(ModRepository repo, String projectId, ProgressListener p) throws Exception {
+        return plan(repo, List.of(projectId), p);
     }
 
-    /** Igual que plan(String), para varios proyectos a la vez (p. ej. todas las dependencias que faltan). */
-    public InstallPlan plan(List<String> projectIdsOrSlugs, ProgressListener p) throws Exception {
+    /** Igual que plan(repo, id), para varios proyectos a la vez (p. ej. todas las dependencias que faltan). */
+    public InstallPlan plan(ModRepository repo, List<String> projectIds, ProgressListener p) throws Exception {
         String mc = instance.config().mcVersion();
         p.onProgress("Comprobando qué mods tienes ya...", -1);
-        Map<String, String> installed = installedProjects(); // projectId -> nombre
+        Map<String, String> installed = installedProjects(); // repo:projectId -> nombre
 
         List<InstallPlan.Item> items = new ArrayList<>();
         List<String> problems = new ArrayList<>();
@@ -227,20 +248,20 @@ public final class ModManager {
         Map<String, String> incompatible = new LinkedHashMap<>(); // projectId -> quién lo declara
         Set<String> seen = new HashSet<>();
         Deque<String[]> queue = new ArrayDeque<>(); // {projectId, versionId|null, pedido por|null}
-        for (String root : projectIdsOrSlugs) queue.add(new String[]{root, null, null});
+        for (String root : projectIds) queue.add(new String[]{root, null, null});
 
         while (!queue.isEmpty()) {
             String[] next = queue.poll();
             String requestedBy = next[2];
-            Modrinth.Project project = Modrinth.project(next[0]);
+            ModRepository.Project project = repo.project(next[0]);
             if (project == null) {
-                problems.add("No existe en Modrinth: " + next[0]);
+                problems.add("No existe en " + repo.displayName() + ": " + next[0]);
                 continue;
             }
             if (!seen.add(project.id())) continue;
             p.onProgress("Buscando versión compatible de " + project.title() + "...", -1);
 
-            if (installed.containsKey(project.id())) {
+            if (installed.containsKey(repo.id() + ":" + project.id())) {
                 if (requestedBy == null) problems.add(project.title() + " ya está instalado.");
                 continue;
             }
@@ -251,23 +272,28 @@ public final class ModManager {
                 continue;
             }
 
-            Modrinth.Version v = null;
+            ModRepository.Version v = null;
             if (next[1] != null) {
-                Modrinth.Version pinned = Modrinth.version(next[1]);
+                ModRepository.Version pinned = repo.version(project.id(), next[1]);
                 if (pinned != null && pinned.gameVersions().contains(mc) && pinned.loaders().contains(LOADER)) v = pinned;
             }
-            if (v == null) v = Modrinth.best(Modrinth.versions(project.id(), LOADER, mc));
+            if (v == null) v = ModRepository.best(repo.versions(project.id(), LOADER, mc));
+            String who = requestedBy != null ? " (lo necesita " + requestedBy + ")" : "";
             if (v == null || v.file() == null) {
-                problems.add(project.title() + (requestedBy != null ? " (lo necesita " + requestedBy + ")" : "")
-                        + " no tiene versión para Fabric y Minecraft " + mc + ".");
+                problems.add(project.title() + who + " no tiene versión para Fabric y Minecraft " + mc + ".");
+                continue;
+            }
+            if (v.file().url() == null) {
+                problems.add(project.title() + who + ": su autor no deja descargarlo desde otras apps. Bájalo de "
+                        + project.pageUrl() + " y añádelo con «Añadir .jar».");
                 continue;
             }
             items.add(new InstallPlan.Item(project, v, requestedBy));
 
-            for (Modrinth.Dependency d : v.dependencies()) {
+            for (ModRepository.Dependency d : v.dependencies()) {
                 String pid = d.projectId();
                 if (pid == null && d.versionId() != null) {
-                    Modrinth.Version dv = Modrinth.version(d.versionId());
+                    ModRepository.Version dv = repo.version(null, d.versionId());
                     pid = dv == null ? null : dv.projectId();
                 }
                 if (pid == null) continue;
@@ -282,7 +308,8 @@ public final class ModManager {
         Set<String> planned = new HashSet<>();
         items.forEach(it -> planned.add(it.project().id()));
         for (Map.Entry<String, String> e : incompatible.entrySet()) {
-            String other = installed.containsKey(e.getKey()) ? installed.get(e.getKey())
+            String key = repo.id() + ":" + e.getKey();
+            String other = installed.containsKey(key) ? installed.get(key)
                     : planned.contains(e.getKey()) ? titleOf(items, e.getKey()) : null;
             if (other != null) problems.add(e.getValue() + " es incompatible con " + other + ".");
         }
@@ -303,18 +330,25 @@ public final class ModManager {
                 .map(i -> i.project().title()).findFirst().orElse(projectId);
     }
 
-    /** Proyectos de Modrinth ya presentes: por lo guardado al instalarlos y, si no, por la huella del fichero. */
+    /**
+     * Proyectos ya presentes como "repo:projectId": por lo guardado al instalarlos y, si no, por la huella
+     * del fichero en Modrinth.
+     */
     private Map<String, String> installedProjects() throws Exception {
         Map<String, String> out = new HashMap<>();
         Map<String, InstalledMod> byHash = new HashMap<>();
         for (InstalledMod m : list()) {
-            if (m.source() != null && m.source().projectId() != null) out.put(m.source().projectId(), m.displayName());
-            else byHash.put(Hashes.sha1(m.file()), m);
+            ModSource src = m.source();
+            if (src != null && src.repo() != null && src.projectId() != null) {
+                out.put(src.repo() + ":" + src.projectId(), m.displayName());
+            } else {
+                byHash.put(Hashes.sha1(m.file()), m);
+            }
         }
         if (!byHash.isEmpty()) {
             try {
-                Modrinth.versionsByHash(new ArrayList<>(byHash.keySet())).forEach((hash, v) ->
-                        out.put(v.projectId(), byHash.get(hash).displayName()));
+                Modrinth.INSTANCE.versionsByHash(new ArrayList<>(byHash.keySet())).forEach((hash, v) ->
+                        out.put("modrinth:" + v.projectId(), byHash.get(hash).displayName()));
             } catch (Exception ignored) {
                 // sin esta consulta solo se pierde detectar duplicados de mods añadidos a mano
             }
@@ -341,7 +375,7 @@ public final class ModManager {
 
     /**
      * Instala el modpack: descarga sus mods de servidor, pone la versión de Fabric Loader que pide y
-     * aplica sus overrides. Los mods que hubiera se apartan a una carpeta "mods-antes-de-..." por si acaso.
+     * aplica sus overrides. Sirve para .mrpack y para modpacks de CurseForge. Los mods que hubiera se apartan a una carpeta "mods-antes-de-..." por si acaso.
      *
      * @return problemas de compatibilidad tras instalarlo
      */
@@ -382,11 +416,11 @@ public final class ModManager {
                         Files.move(f, target, StandardCopyOption.REPLACE_EXISTING);
                         if (rel.getNameCount() == 2 && rel.getName(0).toString().equals("mods")) {
                             sources.put(rel.getFileName().toString(),
-                                    new ModSource(null, null, null, "modpack:" + pack.name()).toMap());
+                                    new ModSource(null, null, null, null, "modpack:" + pack.name()).toMap());
                         }
                     }
                 }
-                Mrpack.extractOverrides(mrpackFile, instance.dir());
+                Mrpack.extractOverrides(pack, mrpackFile, instance.dir());
 
                 Map<String, Object> store = new LinkedHashMap<>();
                 Map<String, Object> packInfo = new LinkedHashMap<>();
@@ -402,7 +436,13 @@ public final class ModManager {
             JavaRuntimeManager.deleteRecursively(staging);
         }
         p.onProgress("Modpack instalado", 1);
-        return check();
+        List<Issue> issues = new ArrayList<>();
+        for (String u : pack.unavailable()) {
+            issues.add(new Issue(CompatibilityChecker.Severity.ERROR, u, null, "No se pudo descargar automáticamente: "
+                    + "su autor solo permite bajarlo desde CurseForge. Descárgalo y añádelo con «Añadir .jar».", null));
+        }
+        issues.addAll(check());
+        return issues;
     }
 
     // ---------------- utilidades ----------------
