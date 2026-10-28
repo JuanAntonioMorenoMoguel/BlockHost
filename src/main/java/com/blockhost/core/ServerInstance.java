@@ -21,6 +21,7 @@ public final class ServerInstance {
     private String loaderVersion; // versión de Fabric Loader, Forge o NeoForge; null en Vanilla/Paper o servidores antiguos
     private int autoBackupHours = DEFAULT_BACKUP_HOURS; // 0 = sin copias automáticas
     private int autoBackupKeep = DEFAULT_BACKUP_KEEP;
+    private boolean openRouterPort = true;
 
     public ServerInstance(Path dir, ServerConfig config, Path javaPath, String jarName) {
         this(dir, config, javaPath, jarName, null);
@@ -41,6 +42,9 @@ public final class ServerInstance {
     public String loaderVersion() { return loaderVersion; }
     public int autoBackupHours() { return autoBackupHours; }
     public int autoBackupKeep() { return autoBackupKeep; }
+    /** Abrir el puerto en el router (UPnP / NAT-PMP) al iniciar el servidor. */
+    public boolean openRouterPort() { return openRouterPort; }
+    public void setOpenRouterPort(boolean on) { this.openRouterPort = on; }
 
     public void setConfig(ServerConfig config) { this.config = config; }
     public void setJavaPath(Path javaPath) { this.javaPath = javaPath; }
@@ -60,6 +64,7 @@ public final class ServerInstance {
         if (loaderVersion != null) m.put("loaderVersion", loaderVersion);
         m.put("autoBackupHours", autoBackupHours);
         m.put("autoBackupKeep", autoBackupKeep);
+        m.put("openRouterPort", openRouterPort);
         Files.writeString(dir.resolve(FILE), Json.write(m), StandardCharsets.UTF_8);
     }
 
@@ -72,6 +77,7 @@ public final class ServerInstance {
                 Json.str(m.get("loaderVersion")));
         inst.setAutoBackup((int) Json.num(m.get("autoBackupHours"), DEFAULT_BACKUP_HOURS),
                 (int) Json.num(m.get("autoBackupKeep"), DEFAULT_BACKUP_KEEP));
+        inst.setOpenRouterPort(Json.bool(m.get("openRouterPort"), true));
         return inst;
     }
 
