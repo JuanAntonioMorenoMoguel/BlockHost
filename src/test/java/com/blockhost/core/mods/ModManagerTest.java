@@ -93,6 +93,20 @@ class ModManagerTest {
         Mrpack.Pack otherMc = Mrpack.parse(MrpackTest.INDEX.replace("\"minecraft\": \"1.21.4\"", "\"minecraft\": \"1.20.1\""));
         assertEquals(1, mods.modpackBlockers(otherMc).size());
         Mrpack.Pack forge = Mrpack.parse(MrpackTest.INDEX.replace("\"fabric-loader\"", "\"forge\""));
-        assertTrue(mods.modpackBlockers(forge).get(0).contains("forge"));
+        assertTrue(mods.modpackBlockers(forge).get(0).contains("Forge"));
+    }
+
+    @Test
+    void paperServersManagePlugins() throws IOException {
+        ServerConfig cfg = new ServerConfig("Plugins", ServerType.PAPER, "1.21.4", 2048, 25565, "motd", 10,
+                "normal", "survival", true, true);
+        ModManager plugins = new ModManager(new ServerInstance(dir.resolve("paper"), cfg, inst.javaPath(), "paper.jar"));
+        assertEquals("plugins", plugins.modsDir().getFileName().toString());
+        assertEquals(List.of("paper", "spigot", "bukkit"), plugins.loaders());
+        LoaderMetadataTest.plugin(plugins.modsDir(), "Vault", "api-version: 1.13\n");
+        LoaderMetadataTest.plugin(plugins.modsDir(), "Shop", "depend: [Vault, Economy]\n");
+        List<CompatibilityChecker.Issue> issues = plugins.check();
+        assertEquals(1, issues.size(), issues.toString());
+        assertEquals(List.of("economy"), ModManager.missingDependencies(issues));
     }
 }

@@ -102,7 +102,8 @@ public class App extends Application {
             content.getChildren().setAll(welcome());
             return;
         }
-        ServerPane pane = panes.computeIfAbsent(inst.dir(), d -> new ServerPane(inst, getHostServices()));
+        ServerPane pane = panes.computeIfAbsent(inst.dir(), d -> new ServerPane(inst, getHostServices(),
+                this::edited, this::deleted));
         content.getChildren().setAll(pane);
     }
 
@@ -145,6 +146,19 @@ public class App extends Application {
         }, "desktop-shortcut");
         t.setDaemon(true);
         t.start();
+    }
+
+    /** Tras cambiar ajustes se rehace el panel (con el servidor detenido, no se pierde nada importante). */
+    private void edited(ServerInstance inst) {
+        ServerPane old = panes.remove(inst.dir());
+        if (old != null) old.dispose();
+        refresh(inst.dir());
+    }
+
+    private void deleted(ServerInstance inst) {
+        ServerPane old = panes.remove(inst.dir());
+        if (old != null) old.dispose();
+        refresh(null);
     }
 
     private void openWizard() {

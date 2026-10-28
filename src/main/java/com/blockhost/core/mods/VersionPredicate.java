@@ -27,10 +27,43 @@ public final class VersionPredicate {
         String r = range.trim();
         if (r.isEmpty() || r.equals("*")) return true;
         if (version == null) return false;
+        if (r.startsWith("[") || r.startsWith("(")) return matchesMaven(version, r);
         for (String part : r.split("\\s+")) {
             if (!matchesSingle(version, part)) return false;
         }
         return true;
+    }
+
+    private static final Pattern MAVEN_GROUP = Pattern.compile("([\\[(])([^\\])]*)([\\])])");
+
+    /**
+     * Rangos de Maven, los de Forge/NeoForge: "[1.20.1,1.21)", "[47,)", "[1.0]", "(,2.0]". Varios grupos
+     * separados por comas se cumplen con que valga uno.
+     */
+    static boolean matchesMaven(String version, String range) {
+        Matcher m = MAVEN_GROUP.matcher(range);
+        boolean any = false;
+        while (m.find()) {
+            any = true;
+            boolean lowInc = m.group(1).equals("["), highInc = m.group(3).equals("]");
+            String body = m.group(2).trim();
+            if (!body.contains(",")) {
+                if (compare(version, body) == 0) return true;
+                continue;
+            }
+            String low = body.substring(0, body.indexOf(',')).trim(), high = body.substring(body.indexOf(',') + 1).trim();
+            boolean ok = true;
+            if (!low.isEmpty()) {
+                int c = compare(version, low);
+                ok = lowInc ? c >= 0 : c > 0;
+            }
+            if (ok && !high.isEmpty()) {
+                int c = compare(version, high);
+                ok = highInc ? c <= 0 : c < 0;
+            }
+            if (ok) return true;
+        }
+        return !any; // si no se entiende el rango, no se bloquea nada
     }
 
     private static boolean matchesSingle(String version, String p) {

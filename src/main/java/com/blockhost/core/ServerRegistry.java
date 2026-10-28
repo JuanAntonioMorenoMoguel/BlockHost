@@ -39,6 +39,26 @@ public final class ServerRegistry {
         return f.isEmpty() ? "servidor" : f;
     }
 
+    /** Borra el servidor entero: mundo, mods, copias de seguridad... No se puede deshacer. */
+    public static void delete(ServerInstance inst) throws IOException {
+        Path dir = inst.dir().toAbsolutePath().normalize();
+        if (!dir.startsWith(AppPaths.servers().toAbsolutePath().normalize()) || !Files.exists(dir.resolve(ServerInstance.FILE))) {
+            throw new IOException("No parece la carpeta de un servidor de BlockHost: " + dir);
+        }
+        // primero el fichero de BlockHost: si algo queda bloqueado a medias, ya no aparece como servidor roto
+        Files.delete(dir.resolve(ServerInstance.FILE));
+        JavaRuntimeManager.deleteRecursively(dir);
+    }
+
+    /** ¿Hay otro servidor (distinto de except) con ese nombre visible? */
+    public static boolean nameTaken(String displayName, ServerInstance except) {
+        for (ServerInstance s : list()) {
+            if (except != null && s.dir().equals(except.dir())) continue;
+            if (s.config().name().equalsIgnoreCase(displayName.trim())) return true;
+        }
+        return exists(displayName) && (except == null || !AppPaths.servers().resolve(folderName(displayName)).equals(except.dir()));
+    }
+
     public static boolean exists(String displayName) {
         return Files.exists(AppPaths.servers().resolve(folderName(displayName)));
     }

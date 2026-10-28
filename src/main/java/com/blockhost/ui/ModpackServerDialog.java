@@ -7,7 +7,6 @@ import com.blockhost.core.ServerInstance;
 import com.blockhost.core.ServerRegistry;
 import com.blockhost.core.ServerType;
 import com.blockhost.core.SystemInfo;
-import com.blockhost.core.mods.ModManager;
 import com.blockhost.core.mods.ModRepository;
 import com.blockhost.core.mods.Modrinth;
 import com.blockhost.core.mods.Mrpack;
@@ -37,16 +36,18 @@ import javafx.stage.Window;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Crea un servidor nuevo a partir de un modpack: la versión de Minecraft y de Fabric Loader las fija el pack,
- * así que no hay que adivinarlas.
+ * Crea un servidor nuevo a partir de un modpack de Fabric, Forge o NeoForge: la versión de Minecraft y del loader
+ * las fija el pack, así que no hay que adivinarlas.
  */
 public final class ModpackServerDialog extends Stage {
 
     private static final String EULA_URL = "https://aka.ms/MinecraftEULA";
     private static final int MODPACK_RAM_MB = 6144;
+    private static final List<String> PACK_LOADERS = List.of("fabric", "forge", "neoforge");
 
     private final HostServices host;
     private final Consumer<ServerInstance> onCreated;
@@ -82,7 +83,8 @@ public final class ModpackServerDialog extends Stage {
         title.getStyleClass().add(Styles.TITLE_3);
         packLabel.setWrapText(true);
         packLabel.getStyleClass().add(Styles.TEXT_BOLD);
-        fromModrinth.setOnAction(e -> new ModSearchDialog(this, host, "modpack", null, this::loadFromRepository).show());
+        fromModrinth.setOnAction(e -> new ModSearchDialog(this, host, "modpack", PACK_LOADERS, "Fabric, Forge y NeoForge",
+                null, this::loadFromRepository).show());
         fromFile.setOnAction(e -> loadFromFile());
         HBox sources = new HBox(8, fromModrinth, fromFile);
 
@@ -143,8 +145,8 @@ public final class ModpackServerDialog extends Stage {
         UiTasks.run(() -> {
             try {
                 ModRepository.Version v = ModRepository.best(
-                        Modrinth.INSTANCE.versions(project.id(), ModManager.LOADER, null));
-                if (v == null) throw new IllegalStateException(project.title() + " no tiene versiones para Fabric.");
+                        Modrinth.INSTANCE.versions(project.id(), PACK_LOADERS, null));
+                if (v == null) throw new IllegalStateException(project.title() + " no tiene versiones para Fabric, Forge ni NeoForge.");
                 Path file = Mrpack.download(v, (msg, f) -> Platform.runLater(() -> {
                     progressLabel.setText(msg);
                     progressBar.setProgress(f < 0 ? ProgressBar.INDETERMINATE_PROGRESS : f);
@@ -180,16 +182,18 @@ public final class ModpackServerDialog extends Stage {
 
     private void setPack(Mrpack.Pack p, Path file) {
         errorLabel.setText("");
-        if (!ModManager.LOADER.equals(p.loader())) {
+        ServerType type = ServerType.forModpackLoader(p.loader());
+        if (type == null) {
             pack = null;
             installBtn.setDisable(true);
             errorLabel.setText(p.title() + " usa " + (p.loader() == null ? "Minecraft sin mods" : p.loader())
-                    + ". BlockHost de momento solo instala modpacks de Fabric.");
+                    + ". BlockHost instala modpacks de Fabric, Forge y NeoForge.");
             return;
         }
         pack = p;
         packFile = file;
-        packLabel.setText(p.title() + "\nMinecraft " + p.mcVersion() + " · Fabric Loader " + p.loaderVersion()
+        packLabel.setText(p.title() + "\nMinecraft " + p.mcVersion() + " · " + (type == ServerType.FABRIC ? "Fabric Loader" : type.displayName)
+                + " " + p.loaderVersion()
                 + " · " + p.serverFiles().size() + " archivos para el servidor");
         if (nameField.getText().isBlank()) nameField.setText(p.name());
         installBtn.setDisable(false);
@@ -199,10 +203,10 @@ public final class ModpackServerDialog extends Stage {
         String name = nameField.getText().trim();
         if (pack == null) { errorLabel.setText("Elige un modpack."); return; }
         if (name.isEmpty()) { errorLabel.setText("Ponle un nombre al servidor."); return; }
-        if (ServerRegistry.exists(name)) { errorLabel.setText("Ya tienes un servidor con ese nombre."); return; }
+        if (ServerRegistry.nameTaken(name, null)) { errorLabel.setText("Ya tienes un servidor con ese nombre."); return; }
         if (!eulaBox.isSelected()) { errorLabel.setText("Debes aceptar la EULA de Minecraft para continuar."); return; }
 
-        ServerConfig cfg = new ServerConfig(name, ServerType.FABRIC, pack.mcVersion(), (int) ramSlider.getValue(),
+        ServerConfig cfg = new ServerConfig(name, ServerType.forModpackLoader(pack.loader()), pack.mcVersion(), (int) ramSlider.getValue(),
                 port(), pack.name(), 10, "normal", "survival", true, true);
         Mrpack.Pack p = pack;
         Path file = packFile;

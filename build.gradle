@@ -7,7 +7,7 @@ plugins {
 }
 
 group = 'com.blockhost'
-version = '0.1.0'
+version = '0.2.0'
 
 repositories {
     mavenCentral()
@@ -46,7 +46,7 @@ application {
     applicationName = 'BlockHost'
 }
 
-// ./gradlew jpackage  ->  build/jpackage/  (instalador nativo con runtime incluido)
+// ./gradlew installer  ->  build/jpackage/BlockHost-<versión>.exe  (instalador de Windows con Java incluido)
 runtime {
     options = ['--strip-debug', '--compress', 'zip-6', '--no-header-files', '--no-man-pages']
     modules = ['java.base', 'java.desktop', 'java.logging', 'java.management', 'jdk.management',
@@ -56,6 +56,8 @@ runtime {
         imageName = 'BlockHost'
         installerName = 'BlockHost'
         appVersion = project.version
+        if (OperatingSystem.current().isWindows()) installerType = 'exe'
+        installerOptions += ['--vendor', 'BlockHost', '--description', 'Servidores de Minecraft en tu PC']
         // Sin --win-console: BlockHost.exe abre solo la ventana de la app, sin consola detrás.
         if (OperatingSystem.current().isWindows()) {
             imageOptions += ['--icon', file('packaging/icon.ico').path]
@@ -63,7 +65,11 @@ runtime {
             imageOptions += ['--icon', file('packaging/icon.png').path]
         }
         if (OperatingSystem.current().isWindows()) {
-            installerOptions += ['--win-dir-chooser', '--win-menu', '--win-shortcut', '--win-per-user-install']
+            // Necesita WiX Toolset 3 (https://github.com/wixtoolset/wix3/releases). Instalación por usuario: sin
+            // pedir permisos de administrador. El UUID fijo hace que una versión nueva sustituya a la anterior.
+            installerOptions += ['--win-dir-chooser', '--win-menu', '--win-menu-group', 'BlockHost', '--win-shortcut',
+                                 '--win-shortcut-prompt', '--win-per-user-install',
+                                 '--win-upgrade-uuid', '6f1d9a3e-4b7c-4f2a-9d55-0b8f3c2e7a41']
         }
     }
 }
@@ -78,5 +84,19 @@ tasks.register('app') {
         def dir = layout.buildDirectory.dir('jpackage/BlockHost').get().asFile
         def exe = OperatingSystem.current().isWindows() ? new File(dir, 'BlockHost.exe') : dir
         println "\nApp lista: ${exe}\nÁbrela con doble clic (puedes anclarla a la barra de tareas o crear un acceso directo)."
+    }
+}
+
+// ./gradlew installer  ->  instalador de Windows (BlockHost-<versión>.exe): asistente de instalación, entrada en el
+// menú Inicio, acceso directo en el escritorio y desinstalación desde «Aplicaciones». Requiere WiX Toolset 3.
+tasks.register('installer') {
+    group = 'distribution'
+    description = 'Genera el instalador de Windows (.exe) con Java incluido.'
+    dependsOn 'jpackage'
+    doLast {
+        def dir = layout.buildDirectory.dir('jpackage').get().asFile
+        def files = dir.listFiles().findAll { it.isFile() && (it.name.endsWith('.exe') || it.name.endsWith('.msi')
+                || it.name.endsWith('.deb') || it.name.endsWith('.rpm') || it.name.endsWith('.dmg')) }
+        println "\nInstalador listo: ${files.join(', ')}"
     }
 }

@@ -9,16 +9,22 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Lo que declara un .jar de mod. Para Fabric se lee fabric.mod.json (dependencias, incompatibilidades,
- * entorno y los mods que lleva incrustados en META-INF/jars). De otros loaders solo se detecta cuál es.
+ * Lo que declara un .jar de mod o plugin: fabric.mod.json (Fabric), META-INF/mods.toml (Forge),
+ * META-INF/neoforge.mods.toml (NeoForge) o plugin.yml / paper-plugin.yml (Paper). Se leen dependencias,
+ * incompatibilidades y los mods que lleva incrustados (META-INF/jars en Fabric, META-INF/jarjar en Forge).
+ *
+ * <p>Los rangos de versión se guardan con la sintaxis de cada loader: la de Fabric ("&gt;=1.2") o la de Maven
+ * de Forge ("[1.2,)"). {@link VersionPredicate} entiende las dos.
  */
 public record ModMetadata(
         Loader loader,
@@ -31,7 +37,8 @@ public record ModMetadata(
         Map<String, List<String>> conflicts,// funciona, pero con problemas conocidos
         List<String> provides,              // alias que también cuenta como instalado
         List<ModMetadata> nested,           // jar-in-jar
-        String icon                         // ruta del icono dentro del .jar, o null
+        String icon,                        // ruta del icono dentro del .jar, o null
+        Set<Loader> loaders                 // todos los loaders que declara (hay .jar para Forge y NeoForge a la vez)
 ) {
 
     public enum Loader {
@@ -51,17 +58,25 @@ public record ModMetadata(
 
     public boolean clientOnly() { return "client".equals(environment); }
 
-    /** Lee el .jar. Si no es un zip válido lanza IOException; si no es de Fabric devuelve el loader detectado. */
-    public static ModMetadata read(Path jar) throws IOException {
+    /** ¿Lo carga un servidor de ese tipo? */
+    public boolean supports(Loader l) { return loaders.contains(l); }
+
+    /** Lee el .jar como mod de Fabric (o lo que sea, si no lo es). */
+    public static ModMetadata read(Path jar) throws IOException { return read(jar, Loader.FABRIC); }
+
+    /**
+     * Lee el .jar. Si declara varios loaders, se usan los datos del preferido (el del servidor).
+     * Si no es un zip válido lanza IOException.
+     */
+    public static ModMetadata read(Path jar, Loader prefer) throws IOException {
         try (InputStream in = Files.newInputStream(jar)) {
-            return read(in, 0);
+            return read(in, prefer, 0);
         }
     }
 
-    static ModMetadata read(InputStream raw, int depth) throws IOException {
-        String fabricJson = null;
-        Loader other = Loader.UNKNOWN;
-        Map<String, byte[]> jars = new HashMap<>();
+    static ModMetadata read(InputStream raw, Loader prefer, int depth) throws IOException {
+        Map<String, String> texts = new HashMap<>();
+        Map<String, byte[]> jars = new LinkedHashMap<>();
         boolean anyEntry = false;
         try (ZipInputStream zin = new ZipInputStream(raw)) {
             ZipEntry e;
@@ -69,13 +84,13 @@ public record ModMetadata(
                 anyEntry = true;
                 String n = e.getName();
                 switch (n) {
-                    case "fabric.mod.json" -> fabricJson = new String(zin.readAllBytes(), StandardCharsets.UTF_8);
-                    case "quilt.mod.json" -> other = prefer(other, Loader.QUILT);
-                    case "META-INF/neoforge.mods.toml" -> other = prefer(other, Loader.NEOFORGE);
-                    case "META-INF/mods.toml", "mcmod.info" -> other = prefer(other, Loader.FORGE);
-                    case "plugin.yml", "paper-plugin.yml" -> other = prefer(other, Loader.BUKKIT);
+                    case "fabric.mod.json", "quilt.mod.json", "META-INF/neoforge.mods.toml", "META-INF/mods.toml",
+                         "mcmod.info", "plugin.yml", "paper-plugin.yml", "META-INF/MANIFEST.MF",
+                         "META-INF/jarjar/metadata.json" ->
+                            texts.put(n, new String(zin.readAllBytes(), StandardCharsets.UTF_8).replace("\uFEFF", ""));
                     default -> {
-                        if (depth < MAX_NESTING && n.startsWith("META-INF/jars/") && n.endsWith(".jar")) {
+                        if (depth < MAX_NESTING && n.endsWith(".jar")
+                                && (n.startsWith("META-INF/jars/") || n.startsWith("META-INF/jarjar/"))) {
                             jars.put(n, zin.readAllBytes());
                         }
                     }
@@ -83,11 +98,39 @@ public record ModMetadata(
             }
         }
         if (!anyEntry) throw new IOException("No es un archivo .jar válido");
-        if (fabricJson == null) return unknown(other);
 
+        Set<Loader> loaders = EnumSet.noneOf(Loader.class);
+        if (texts.containsKey("fabric.mod.json")) loaders.add(Loader.FABRIC);
+        if (texts.containsKey("quilt.mod.json")) loaders.add(Loader.QUILT);
+        if (texts.containsKey("META-INF/neoforge.mods.toml")) loaders.add(Loader.NEOFORGE);
+        if (texts.containsKey("META-INF/mods.toml")) {
+            // NeoForge 20.2–20.4 aún leía mods.toml; se reconoce porque depende de "neoforge"
+            loaders.add(texts.get("META-INF/mods.toml").contains("\"neoforge\"") ? Loader.NEOFORGE : Loader.FORGE);
+        }
+        if (texts.containsKey("mcmod.info")) loaders.add(Loader.FORGE);
+        if (texts.containsKey("plugin.yml") || texts.containsKey("paper-plugin.yml")) loaders.add(Loader.BUKKIT);
+
+        Loader use = loaders.contains(prefer) ? prefer
+                : loaders.stream().filter(l -> l != Loader.QUILT).findFirst().orElse(loaders.isEmpty() ? Loader.UNKNOWN : Loader.QUILT);
+        try {
+            return switch (use) {
+                case FABRIC -> fabric(texts.get("fabric.mod.json"), jars, depth, loaders);
+                case FORGE, NEOFORGE -> forge(use, texts, jars, depth, loaders);
+                case BUKKIT -> bukkit(texts, loaders);
+                default -> unknown(use, loaders);
+            };
+        } catch (IllegalArgumentException ex) {
+            throw new IOException("Datos del mod ilegibles: " + ex.getMessage());
+        }
+    }
+
+    // ---------------- Fabric ----------------
+
+    private static ModMetadata fabric(String fabricJson, Map<String, byte[]> jars, int depth, Set<Loader> loaders)
+            throws IOException {
         Map<String, Object> m;
         try {
-            m = Json.obj(Json.parse(fabricJson.replace("﻿", "")));
+            m = Json.obj(Json.parse(fabricJson));
         } catch (IllegalArgumentException ex) {
             throw new IOException("fabric.mod.json ilegible: " + ex.getMessage());
         }
@@ -98,7 +141,7 @@ public record ModMetadata(
                 byte[] bytes = jars.get(Json.str(Json.path(o, "file")));
                 if (bytes == null) continue;
                 try {
-                    ModMetadata n = read(new ByteArrayInputStream(bytes), depth + 1);
+                    ModMetadata n = read(new ByteArrayInputStream(bytes), Loader.FABRIC, depth + 1);
                     if (n.loader() == Loader.FABRIC) nested.add(n);
                 } catch (IOException ignored) {
                     // un jar incrustado roto no invalida el mod
@@ -117,16 +160,116 @@ public record ModMetadata(
                 ranges(m.get("conflicts")),
                 m.get("provides") instanceof List<?> p ? p.stream().map(String::valueOf).toList() : List.of(),
                 nested,
-                icon(m.get("icon")));
+                icon(m.get("icon")),
+                loaders);
     }
 
-    private static Loader prefer(Loader current, Loader found) {
-        // neoforge.mods.toml es más específico que mods.toml
-        return current == Loader.UNKNOWN || (current == Loader.FORGE && found == Loader.NEOFORGE) ? found : current;
+    // ---------------- Forge / NeoForge ----------------
+
+    /**
+     * mods.toml: el primer [[mods]] es el mod; [[dependencies.&lt;id&gt;]] sus dependencias. Forge marca las
+     * obligatorias con mandatory=true y NeoForge con type="required". Las de side="CLIENT" no cuentan en un servidor.
+     */
+    private static ModMetadata forge(Loader loader, Map<String, String> texts, Map<String, byte[]> jars, int depth,
+                                     Set<Loader> loaders) {
+        String toml = loader == Loader.NEOFORGE && texts.containsKey("META-INF/neoforge.mods.toml")
+                ? texts.get("META-INF/neoforge.mods.toml") : texts.get("META-INF/mods.toml");
+        if (toml == null) return unknown(loader, loaders); // solo mcmod.info: Forge muy antiguo
+        List<MetaFormats.TomlTable> tables = MetaFormats.toml(toml);
+
+        Map<String, Object> mod = tables.stream().filter(t -> t.name().equals("mods")).findFirst()
+                .map(MetaFormats.TomlTable::values).orElse(Map.of());
+        String id = Json.str(mod.get("modId"));
+        String version = Json.str(mod.get("version"));
+        if (version == null || version.contains("${")) version = manifestVersion(texts.get("META-INF/MANIFEST.MF"));
+        Object logo = mod.get("logoFile");
+        if (logo == null) logo = tables.get(0).values().get("logoFile");
+
+        Map<String, List<String>> depends = new LinkedHashMap<>();
+        Map<String, List<String>> breaks = new LinkedHashMap<>();
+        Map<String, List<String>> conflicts = new LinkedHashMap<>();
+        for (MetaFormats.TomlTable t : tables) {
+            if (id == null || !t.name().equals("dependencies." + id)) continue;
+            Map<String, Object> d = t.values();
+            String dep = Json.str(d.get("modId"));
+            if (dep == null || "CLIENT".equalsIgnoreCase(Json.str(d.get("side")))) continue;
+            String range = mavenRange(Json.str(d.get("versionRange")));
+            String type = Json.str(d.get("type"));
+            if (type == null) type = Boolean.TRUE.equals(d.get("mandatory")) ? "required" : "optional";
+            switch (type.toLowerCase()) {
+                case "required" -> depends.put(dep, List.of(range));
+                case "incompatible" -> breaks.put(dep, List.of(range));
+                case "discouraged" -> conflicts.put(dep, List.of(range));
+                default -> { } // optional
+            }
+        }
+
+        // jar-in-jar de Forge: META-INF/jarjar/*.jar (las librerías incrustadas cuentan como instaladas)
+        List<ModMetadata> nested = new ArrayList<>();
+        for (Map.Entry<String, byte[]> e : jars.entrySet()) {
+            if (!e.getKey().startsWith("META-INF/jarjar/")) continue;
+            try {
+                ModMetadata n = read(new ByteArrayInputStream(e.getValue()), loader, depth + 1);
+                if (n.id() != null) nested.add(n);
+            } catch (IOException ignored) {
+                // librería sin datos de mod
+            }
+        }
+
+        // modId adicionales del mismo jar (algunos declaran varios [[mods]])
+        List<String> provides = new ArrayList<>();
+        tables.stream().filter(t -> t.name().equals("mods")).skip(1)
+                .map(t -> Json.str(t.values().get("modId"))).filter(x -> x != null).forEach(provides::add);
+
+        return new ModMetadata(loader, id, Json.str(mod.get("displayName")), version, "*", depends, breaks, conflicts,
+                provides, nested, Json.str(logo), loaders);
     }
 
-    private static ModMetadata unknown(Loader loader) {
-        return new ModMetadata(loader, null, null, null, "*", Map.of(), Map.of(), Map.of(), List.of(), List.of(), null);
+    /** "[47,)" se queda igual; una versión suelta en Maven es solo una preferencia ("1.2" = cualquiera). */
+    private static String mavenRange(String r) {
+        if (r == null || r.isBlank()) return "*";
+        String t = r.trim();
+        return t.startsWith("[") || t.startsWith("(") ? t : "*";
+    }
+
+    private static String manifestVersion(String manifest) {
+        if (manifest == null) return null;
+        for (String line : manifest.split("\r?\n")) {
+            if (line.startsWith("Implementation-Version:")) return line.substring(line.indexOf(':') + 1).trim();
+        }
+        return null;
+    }
+
+    // ---------------- Paper / Bukkit ----------------
+
+    /**
+     * plugin.yml: name, version, depend (obligatorias) y api-version (versión mínima de Minecraft).
+     * paper-plugin.yml: dependencies.server.&lt;nombre&gt; con required (por defecto true).
+     */
+    private static ModMetadata bukkit(Map<String, String> texts, Set<Loader> loaders) {
+        boolean paper = texts.containsKey("paper-plugin.yml");
+        Map<String, Object> y = MetaFormats.yaml(paper ? texts.get("paper-plugin.yml") : texts.get("plugin.yml"));
+        String name = Json.str(y.get("name"));
+        Map<String, List<String>> depends = new LinkedHashMap<>();
+        String api = Json.str(y.get("api-version"));
+        if (api != null && api.matches("\\d+(\\.\\d+)*")) depends.put("minecraft", List.of(">=" + api));
+        if (paper) {
+            if (Json.path(y, "dependencies", "server") instanceof Map<?, ?> server) {
+                server.forEach((k, v) -> {
+                    boolean required = !(v instanceof Map<?, ?> m) || !"false".equals(Json.str(m.get("required")));
+                    if (required) depends.put(String.valueOf(k), List.of("*"));
+                });
+            }
+        } else if (y.get("depend") instanceof List<?> l) {
+            l.forEach(d -> depends.put(String.valueOf(d), List.of("*")));
+        }
+        return new ModMetadata(Loader.BUKKIT, name, name, Json.str(y.get("version")), "*", depends, Map.of(), Map.of(),
+                List.of(), List.of(), null, loaders);
+    }
+
+    private static ModMetadata unknown(Loader loader, Set<Loader> loaders) {
+        return new ModMetadata(loader, null, null, null, "*", Map.of(), Map.of(), Map.of(), List.of(), List.of(), null,
+                loaders);
     }
 
     /** "icon" puede ser una ruta o {"16": "...", "128": "..."}: se elige la mayor que no pase de 128 px. */
