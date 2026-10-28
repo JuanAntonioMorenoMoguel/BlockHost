@@ -1,8 +1,6 @@
 package com.blockhost.core;
 
 import java.io.IOException;
-import java.io.Reader;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,7 +10,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.UUID;
 
 /**
@@ -116,28 +113,15 @@ public final class PlayerLists {
     // ---------------- lista blanca activada ----------------
 
     public boolean whitelistEnabled() throws IOException {
-        return "true".equalsIgnoreCase(properties().getProperty("white-list", "false").trim());
+        return ServerProperties.load(dir).getBool("white-list", false);
     }
 
     /** Activa la lista blanca en server.properties (con enforce: echa a quien no esté al recargar). */
     public void setWhitelistEnabled(boolean on) throws IOException {
-        Properties p = properties();
-        p.setProperty("white-list", String.valueOf(on));
-        p.setProperty("enforce-whitelist", String.valueOf(on));
-        try (Writer w = Files.newBufferedWriter(dir.resolve("server.properties"), StandardCharsets.UTF_8)) {
-            p.store(w, "Generado por BlockHost");
-        }
-    }
-
-    private Properties properties() throws IOException {
-        Properties p = new Properties();
-        Path f = dir.resolve("server.properties");
-        if (Files.isRegularFile(f)) {
-            try (Reader r = Files.newBufferedReader(f, StandardCharsets.UTF_8)) {
-                p.load(r);
-            }
-        }
-        return p;
+        ServerProperties p = ServerProperties.load(dir);
+        p.set("white-list", String.valueOf(on));
+        p.set("enforce-whitelist", String.valueOf(on));
+        p.save();
     }
 
     // ---------------- UUID ----------------
@@ -161,9 +145,13 @@ public final class PlayerLists {
                 + hex.substring(16, 20) + "-" + hex.substring(20);
     }
 
+    /**
+     * Las cuentas oficiales usan 3–16 letras, números o _, pero en modo offline, con Geyser (".Nombre") o con
+     * algunos mods hay otros nombres. Solo se rechaza lo que rompería el comando: espacios o vacío.
+     */
     public static void checkName(String name) {
-        if (name == null || !name.matches("[A-Za-z0-9_]{3,16}")) {
-            throw new IllegalArgumentException("Un nombre de Minecraft tiene de 3 a 16 letras, números o _.");
+        if (name == null || !name.matches("\\S{1,32}")) {
+            throw new IllegalArgumentException("Escribe el nombre del jugador tal cual sale en el juego, sin espacios.");
         }
     }
 

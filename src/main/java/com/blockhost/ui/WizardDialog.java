@@ -9,6 +9,9 @@ import com.blockhost.core.ServerType;
 import com.blockhost.core.SystemInfo;
 import javafx.application.HostServices;
 import javafx.application.Platform;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -70,7 +73,10 @@ public final class WizardDialog extends Stage {
     private final TextField nameField = new TextField("Mi servidor");
     private final ToggleGroup typeGroup = new ToggleGroup();
     // Paso 2
-    private final ListView<String> versionList = new ListView<>();
+    private final ObservableList<String> allVersions = FXCollections.observableArrayList();
+    private final FilteredList<String> shownVersions = new FilteredList<>(allVersions);
+    private final ListView<String> versionList = new ListView<>(shownVersions);
+    private final TextField versionSearch = new TextField();
     private final Label versionStatus = new Label();
     private ServerType versionsLoadedFor;
     // Paso 3
@@ -162,7 +168,24 @@ public final class WizardDialog extends Stage {
     private Node buildVersionStep() {
         versionStatus.getStyleClass().add(Styles.TEXT_MUTED);
         VBox.setVgrow(versionList, Priority.ALWAYS);
-        return new VBox(10, new Label("Elige la versión. Tus jugadores deben usar la misma."), versionList, versionStatus);
+        versionSearch.setPromptText("Buscar versión (p. ej. 1.20.1, 1.21...)");
+        versionSearch.textProperty().addListener((o, a, b) -> filterVersions(b));
+        versionList.setPlaceholder(new Label("Ninguna versión coincide"));
+        return new VBox(10, new Label("Elige la versión. Tus jugadores deben usar la misma."), versionSearch, versionList,
+                versionStatus);
+    }
+
+    /** "1.20" muestra 1.20, 1.20.1... pero no 1.2; se busca por el principio de la versión. */
+    private void filterVersions(String text) {
+        String q = text == null ? "" : text.trim();
+        String selected = versionList.getSelectionModel().getSelectedItem();
+        shownVersions.setPredicate(q.isEmpty() ? null : v -> v.equals(q) || v.startsWith(q.endsWith(".") ? q : q + ".")
+                || v.startsWith(q) && !Character.isDigit(v.charAt(q.length())));
+        if (q.length() > 0 && shownVersions.isEmpty()) shownVersions.setPredicate(v -> v.contains(q));
+        if (selected != null && shownVersions.contains(selected)) versionList.getSelectionModel().select(selected);
+        else if (!shownVersions.isEmpty()) versionList.getSelectionModel().select(0);
+        versionStatus.setText(q.isEmpty() ? allVersions.size() + " versiones disponibles. La primera es la más reciente."
+                : shownVersions.size() + " de " + allVersions.size() + " versiones.");
     }
 
     private Node buildResourcesStep() {
@@ -252,7 +275,7 @@ public final class WizardDialog extends Stage {
     }
 
     private void next() {
-        if (current == 1 && versionList.getItems().isEmpty()) { // falló la carga: reintentar
+        if (current == 1 && allVersions.isEmpty()) { // falló la carga: reintentar
             loadVersionsIfNeeded();
             return;
         }
@@ -289,8 +312,9 @@ public final class WizardDialog extends Stage {
 
     private void loadVersionsIfNeeded() {
         ServerType type = selectedType();
-        if (type == versionsLoadedFor && !versionList.getItems().isEmpty()) return;
-        versionList.getItems().clear();
+        if (type == versionsLoadedFor && !allVersions.isEmpty()) return;
+        allVersions.clear();
+        versionSearch.clear();
         versionStatus.setText("Cargando versiones de " + type.displayName + "...");
         nextBtn.setDisable(true);
         runInBackground(() -> {
@@ -298,7 +322,7 @@ public final class WizardDialog extends Stage {
                 List<String> versions = type.provider().listVersions();
                 Platform.runLater(() -> {
                     versionsLoadedFor = type;
-                    versionList.getItems().setAll(versions);
+                    allVersions.setAll(versions);
                     if (!versions.isEmpty()) versionList.getSelectionModel().select(0);
                     versionStatus.setText(versions.size() + " versiones disponibles. La primera es la más reciente.");
                     nextBtn.setDisable(false);

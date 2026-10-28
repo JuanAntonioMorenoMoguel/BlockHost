@@ -27,14 +27,26 @@ Consola en vivo, jugadores conectados, controles e información de conexión (im
 | ![Jugadores](docs/screenshots/jugadores.png) | ![Copias](docs/screenshots/copias.png) |
 | **Rendimiento** | **Actualizar mods** |
 | ![Rendimiento](docs/screenshots/rendimiento.png) | ![Actualizaciones](docs/screenshots/actualizaciones.png) |
+| **Autocompletar comandos** | **Comandos de mods y plugins** |
+| ![Autocompletar](docs/screenshots/autocompletar.png) | ![Comandos aprendidos](docs/screenshots/autocompletar-mods.png) |
+
+### Ajustes
+
+| General | Avanzado (todo `server.properties`) |
+|---|---|
+| ![Ajustes](docs/screenshots/editar.png) | ![Ajustes avanzados](docs/screenshots/editar-avanzado.png) |
+| **Borrar servidor** | |
+| ![Borrar](docs/screenshots/borrar.png) | |
 
 ## Qué hace (v0.2)
 
-- **Asistente en 5 pasos**: nombre y tipo → versión → RAM y puerto → opciones de juego → EULA e instalación.
+- **Asistente en 5 pasos**: nombre y tipo → versión (con buscador: escribe `1.20` y salen las 1.20.x) → RAM y puerto → opciones de juego → EULA e instalación.
 - **Tipos**: Vanilla (Mojang), Paper (plugins, optimizado), Fabric, Forge y NeoForge (mods). Forge y NeoForge se instalan ejecutando su instalador oficial (`--installServer`) con el Java correcto; BlockHost detecta cómo arrancarlos (fichero de argumentos en las versiones modernas, `.jar` en las antiguas desde 1.12.2).
 - **Java automático**: detecta qué Java pide cada versión de Minecraft (8/17/21/25) y descarga Eclipse Temurin solo si hace falta. Se cachea y se comparte entre servidores.
 - **Panel del servidor**: iniciar/detener (parada limpia con `stop`), consola en vivo, envío de comandos, lista de jugadores conectados, abrir carpeta.
-- **Editar y borrar servidores** (botón ⚙): nombre, RAM, puerto, MOTD, jugadores, dificultad, modo de juego, PvP y modo online. Borrar pide escribir el nombre del servidor, porque no se puede deshacer.
+- **Autocompletar comandos**: mientras escribes salen los comandos que existen en la versión de Minecraft del servidor (p. ej. `/tick` solo desde 1.20.3, `/testfor` solo antes de 1.13), sus opciones y los jugadores conectados. Al arrancar se pide `help` en silencio para aprender también los comandos de mods, plugins y datapacks. Tab completa, ↑↓ eligen y, sin sugerencias, ↑ repite comandos anteriores.
+- **Editar y borrar servidores** (botón ⚙): nombre, RAM, puerto, MOTD, jugadores, dificultad, modo de juego, distancia de renderizado, de simulación y de entidades, protección del spawn, PvP, modo online y lista blanca. La pestaña **Avanzado** enseña todo `server.properties` (con buscador y explicación de cada opción en español) y comprueba los valores antes de guardar. Borrar pide escribir el nombre del servidor (sin importar mayúsculas), porque no se puede deshacer.
+- **Sin lista blanca por defecto**: los servidores nuevos se crean con `white-list=false`; se activa desde Ajustes o desde la pestaña Jugadores.
 - **Jugadores**: conectados (hacer operador, echar, banear), operadores, lista blanca (con interruptor para activarla) y baneados, sin escribir comandos. En marcha se aplican con comandos; detenido, se editan `ops.json`, `whitelist.json` y `banned-players.json` (con el UUID oficial de Mojang o el de modo offline).
 - **Copias de seguridad**: manuales y **automáticas cada X horas** mientras el servidor está en marcha (guarda solo las últimas N), sin cortar el juego (`save-off` → `save-all flush` → copia → `save-on`). **Restaurar** una copia con el servidor detenido; antes se guarda el mundo actual por si acaso. Respeta `level-name`.
 - **Rendimiento**: CPU y RAM del servidor y del PC, con gráficas de los últimos 5 minutos y un resumen en la cabecera.
@@ -104,6 +116,8 @@ src/main/java/com/blockhost/
 │   ├── JavaRuntimeManager.java   Descarga/caché de Temurin vía API de Adoptium
 │   ├── ServerInstaller.java      Orquesta la instalación del asistente
 │   ├── ServerProcess.java        Proceso del servidor, consola, estado y jugadores
+│   ├── ServerProperties.java     Leer y guardar server.properties, con la explicación de cada opción
+│   ├── CommandCatalog.java       Comandos de cada versión para autocompletar
 │   ├── Backups.java              Copias del mundo: crear, listar, limpiar y restaurar
 │   ├── PlayerLists.java          Operadores, lista blanca y baneados
 │   ├── ProcessStats.java         CPU y RAM del servidor y del equipo
@@ -112,11 +126,12 @@ src/main/java/com/blockhost/
     ├── App.java                  Ventana principal y lista de servidores
     ├── WizardDialog.java         Asistente
     ├── ServerPane.java           Panel de cada servidor
+    ├── CommandAssist.java        Autocompletar e historial de la línea de comandos
     ├── ModsPane.java             Pestaña de mods o plugins (y actualizaciones)
     ├── PlayersPane.java          Pestaña de jugadores
     ├── BackupsPane.java          Pestaña de copias (y copias automáticas)
     ├── StatsPane.java            Pestaña de rendimiento
-    ├── EditServerDialog.java     Ajustes de un servidor existente
+    ├── EditServerDialog.java     Ajustes de un servidor existente (general y avanzado)
     ├── ModSearchDialog.java      Buscador de mods, plugins y modpacks de Modrinth
     └── ModpackServerDialog.java  Crear servidor desde modpack
 ```
