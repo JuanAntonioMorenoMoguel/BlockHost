@@ -3,6 +3,7 @@ package com.blockhost.core;
 import com.blockhost.core.mods.ModManager;
 import com.blockhost.core.mods.Mrpack;
 import com.blockhost.core.providers.FabricProvider;
+import com.blockhost.core.providers.ForgeProvider;
 import com.blockhost.core.providers.MojangMeta;
 
 import java.io.IOException;
@@ -25,7 +26,8 @@ public final class ServerInstaller {
     }
 
     /**
-     * @param loaderVersion versión de Fabric Loader a instalar (la que pide un modpack); null = la última estable.
+     * @param loaderVersion versión de Fabric Loader, Forge o NeoForge a instalar (la que pide un modpack);
+     *                      null = la recomendada.
      */
     public ServerInstance install(ServerConfig cfg, boolean eulaAccepted, String loaderVersion, ProgressListener p)
             throws Exception {
@@ -48,6 +50,11 @@ public final class ServerInstaller {
                 p.log("Buscando el loader de Fabric para " + cfg.mcVersion() + "...");
                 loader = loaderVersion != null ? loaderVersion : FabricProvider.latestLoader(cfg.mcVersion());
                 jar = FabricProvider.installLoader(cfg.mcVersion(), loader, dir, p);
+            } else if (cfg.type() == ServerType.FORGE || cfg.type() == ServerType.NEOFORGE) {
+                ForgeProvider.Flavor flavor = cfg.type() == ServerType.FORGE ? ForgeProvider.Flavor.FORGE : ForgeProvider.Flavor.NEOFORGE;
+                p.log("Buscando " + flavor.displayName + " para " + cfg.mcVersion() + "...");
+                loader = loaderVersion != null ? loaderVersion : new ForgeProvider(flavor).latestLoader(cfg.mcVersion());
+                jar = ForgeProvider.install(flavor, cfg.mcVersion(), loader, dir, java, p);
             } else {
                 jar = cfg.type().provider().install(cfg.mcVersion(), dir, p);
             }
@@ -57,6 +64,7 @@ public final class ServerInstaller {
                     "# Aceptada por el usuario en el asistente de BlockHost (https://aka.ms/MinecraftEULA)\neula=true\n",
                     StandardCharsets.UTF_8);
             writeProperties(dir, cfg);
+            if (cfg.type().supportsPlugins()) Files.createDirectories(dir.resolve("plugins"));
 
             ServerInstance inst = new ServerInstance(dir, cfg, java, jar, loader);
             inst.save();
@@ -70,19 +78,20 @@ public final class ServerInstaller {
     }
 
     /**
-     * Crea un servidor Fabric con la versión de Minecraft y de Fabric Loader que fija el modpack y lo instala.
-     * Del cfg se usan nombre, RAM, puerto y opciones de juego; tipo y versión los decide el pack.
+     * Crea un servidor Fabric, Forge o NeoForge con la versión de Minecraft y del loader que fija el modpack y
+     * lo instala. Del cfg se usan nombre, RAM, puerto y opciones de juego; tipo y versión los decide el pack.
      */
     public ServerInstance installFromModpack(ServerConfig cfg, Path mrpack, boolean eulaAccepted, ProgressListener p)
             throws Exception {
         Mrpack.Pack pack = Mrpack.read(mrpack);
-        if (!ModManager.LOADER.equals(pack.loader())) {
+        ServerType type = ServerType.forModpackLoader(pack.loader());
+        if (type == null) {
             throw new IllegalStateException("El modpack usa " + (pack.loader() == null ? "Minecraft sin mods" : pack.loader())
-                    + " y BlockHost de momento solo instala modpacks de Fabric.");
+                    + " y BlockHost instala modpacks de Fabric, Forge y NeoForge.");
         }
-        ServerConfig fabric = new ServerConfig(cfg.name(), ServerType.FABRIC, pack.mcVersion(), cfg.ramMb(), cfg.port(),
+        ServerConfig withPack = new ServerConfig(cfg.name(), type, pack.mcVersion(), cfg.ramMb(), cfg.port(),
                 cfg.motd(), cfg.maxPlayers(), cfg.difficulty(), cfg.gamemode(), cfg.onlineMode(), cfg.pvp());
-        ServerInstance inst = install(fabric, eulaAccepted, pack.loaderVersion(), p);
+        ServerInstance inst = install(withPack, eulaAccepted, pack.loaderVersion(), p);
         try {
             new ModManager(inst).installModpack(pack, mrpack, p);
         } catch (Exception e) {

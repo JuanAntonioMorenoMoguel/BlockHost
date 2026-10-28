@@ -1,5 +1,7 @@
 package com.blockhost.core;
 
+import com.blockhost.core.providers.ForgeProvider;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -44,6 +46,12 @@ public final class ServerProcess {
     public Status status() { return status; }
     public boolean isAlive() { return process != null && process.isAlive(); }
 
+    /** El proceso del servidor mientras está en marcha (para medir CPU y RAM). */
+    public ProcessHandle handle() {
+        Process p = process;
+        return p != null && p.isAlive() ? p.toHandle() : null;
+    }
+
     public synchronized void start() throws IOException {
         if (isAlive()) return;
         ServerConfig cfg = instance.config();
@@ -54,8 +62,7 @@ public final class ServerProcess {
         cmd.addAll(jvmFlags(cfg.ramMb()));
         cmd.add("-Dstdout.encoding=UTF-8");
         cmd.add("-Dstderr.encoding=UTF-8");
-        cmd.add("-jar");
-        cmd.add(instance.jarName());
+        cmd.addAll(ForgeProvider.launchArgs(instance.jarName(), System.getProperty("os.name").toLowerCase().contains("win")));
         cmd.add("nogui");
 
         players.clear();

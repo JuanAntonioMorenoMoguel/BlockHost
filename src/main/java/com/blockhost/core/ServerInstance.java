@@ -11,12 +11,16 @@ import java.util.Map;
 public final class ServerInstance {
 
     public static final String FILE = "blockhost.json";
+    public static final int DEFAULT_BACKUP_HOURS = 6;
+    public static final int DEFAULT_BACKUP_KEEP = 8;
 
     private final Path dir;
     private ServerConfig config;
     private Path javaPath;
     private String jarName;
-    private String loaderVersion; // versión de Fabric Loader; null en Vanilla/Paper o servidores antiguos
+    private String loaderVersion; // versión de Fabric Loader, Forge o NeoForge; null en Vanilla/Paper o servidores antiguos
+    private int autoBackupHours = DEFAULT_BACKUP_HOURS; // 0 = sin copias automáticas
+    private int autoBackupKeep = DEFAULT_BACKUP_KEEP;
 
     public ServerInstance(Path dir, ServerConfig config, Path javaPath, String jarName) {
         this(dir, config, javaPath, jarName, null);
@@ -35,10 +39,18 @@ public final class ServerInstance {
     public Path javaPath() { return javaPath; }
     public String jarName() { return jarName; }
     public String loaderVersion() { return loaderVersion; }
+    public int autoBackupHours() { return autoBackupHours; }
+    public int autoBackupKeep() { return autoBackupKeep; }
 
     public void setConfig(ServerConfig config) { this.config = config; }
     public void setJavaPath(Path javaPath) { this.javaPath = javaPath; }
     public void setLoaderVersion(String loaderVersion) { this.loaderVersion = loaderVersion; }
+    public void setJarName(String jarName) { this.jarName = jarName; }
+
+    public void setAutoBackup(int hours, int keep) {
+        this.autoBackupHours = Math.max(0, hours);
+        this.autoBackupKeep = Math.max(1, keep);
+    }
 
     public void save() throws IOException {
         Map<String, Object> m = new LinkedHashMap<>();
@@ -46,16 +58,21 @@ public final class ServerInstance {
         m.put("javaPath", javaPath.toString());
         m.put("jarName", jarName);
         if (loaderVersion != null) m.put("loaderVersion", loaderVersion);
+        m.put("autoBackupHours", autoBackupHours);
+        m.put("autoBackupKeep", autoBackupKeep);
         Files.writeString(dir.resolve(FILE), Json.write(m), StandardCharsets.UTF_8);
     }
 
     public static ServerInstance load(Path dir) throws IOException {
         Map<String, Object> m = Json.obj(Json.parse(Files.readString(dir.resolve(FILE), StandardCharsets.UTF_8)));
-        return new ServerInstance(dir,
+        ServerInstance inst = new ServerInstance(dir,
                 ServerConfig.fromMap(Json.obj(m.get("config"))),
                 Path.of(Json.str(m.get("javaPath"))),
                 Json.str(m.get("jarName")),
                 Json.str(m.get("loaderVersion")));
+        inst.setAutoBackup((int) Json.num(m.get("autoBackupHours"), DEFAULT_BACKUP_HOURS),
+                (int) Json.num(m.get("autoBackupKeep"), DEFAULT_BACKUP_KEEP));
+        return inst;
     }
 
     @Override

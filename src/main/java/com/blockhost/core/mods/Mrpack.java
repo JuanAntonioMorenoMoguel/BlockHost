@@ -54,9 +54,12 @@ public final class Mrpack {
             return null;
         }
 
+        /** Versión del loader; en Forge sin el prefijo de Minecraft ("1.20.1-47.2.0" -> "47.2.0"). */
         public String loaderVersion() {
             for (Map.Entry<String, String> e : dependencies.entrySet()) {
-                if (LOADERS.containsKey(e.getKey())) return e.getValue();
+                if (!LOADERS.containsKey(e.getKey())) continue;
+                String v = e.getValue();
+                return v != null && v.startsWith(mcVersion + "-") ? v.substring(mcVersion.length() + 1) : v;
             }
             return null;
         }

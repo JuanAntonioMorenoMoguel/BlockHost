@@ -10,17 +10,18 @@ public interface ModRepository {
     String displayName();
 
     /**
-     * Busca mods o modpacks compatibles con el loader y la versión de Minecraft (null = cualquiera).
+     * Busca mods, plugins o modpacks compatibles con alguno de los loaders y la versión de Minecraft (null = cualquiera).
      *
-     * @param projectType "mod" o "modpack"
+     * @param projectType "mod", "plugin" o "modpack"
+     * @param loaders     p. ej. ["fabric"] o ["paper", "spigot", "bukkit"]
      */
-    List<Project> search(String query, String projectType, String loader, String mcVersion, int limit) throws Exception;
+    List<Project> search(String query, String projectType, List<String> loaders, String mcVersion, int limit) throws Exception;
 
     /** Proyecto por id (o slug en Modrinth); null si no existe. */
     Project project(String id) throws Exception;
 
-    /** Versiones para ese loader y versión de Minecraft (null = todas), de más nueva a más antigua. */
-    List<Version> versions(String projectId, String loader, String mcVersion) throws Exception;
+    /** Versiones para alguno de esos loaders y esa versión de Minecraft (null = todas), de más nueva a más antigua. */
+    List<Version> versions(String projectId, List<String> loaders, String mcVersion) throws Exception;
 
     Version version(String projectId, String versionId) throws Exception;
 

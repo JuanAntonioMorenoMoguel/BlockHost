@@ -7,6 +7,8 @@ import com.blockhost.core.ServerConfig;
 import com.blockhost.core.ServerInstance;
 import com.blockhost.core.ServerProcess;
 import com.blockhost.core.ServerProcess.Status;
+import com.blockhost.core.ServerRegistry;
+import com.blockhost.core.ServerType;
 import com.blockhost.core.SystemInfo;
 import com.blockhost.core.mods.CompatibilityChecker;
 import com.blockhost.core.mods.ModManager;
@@ -16,6 +18,12 @@ import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.MenuButton;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.Tooltip;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.control.Tab;
@@ -37,8 +45,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
-/** Panel de un servidor: estado, controles, consola en vivo, jugadores conectados y (en Fabric) mods. */
+/**
+ * Panel de un servidor: estado y controles arriba; pestañas de consola, mods o plugins, jugadores,
+ * copias de seguridad y rendimiento.
+ */
 public final class ServerPane extends BorderPane {
 
     private static final int CONSOLE_MAX_CHARS = 400_000;
@@ -46,8 +58,14 @@ public final class ServerPane extends BorderPane {
     private final ServerInstance instance;
     private final ServerProcess process;
     private final HostServices host;
+    private final Consumer<ServerInstance> onEdited;
+    private final Consumer<ServerInstance> onDeleted;
 
     private final Label statusLabel = new Label();
+    private final Label statsLabel = new Label();
+    private final MenuButton settingsMenu = new MenuButton("⚙");
+    private final MenuItem editItem = new MenuItem("Editar ajustes...");
+    private final MenuItem deleteItem = new MenuItem("Borrar servidor...");
     private final Button startBtn = new Button("▶ Iniciar");
     private final Button stopBtn = new Button("■ Detener");
     private final Button backupBtn = new Button("Copia de seguridad");
@@ -58,16 +76,29 @@ public final class ServerPane extends BorderPane {
     private final Label playersTitle = new Label("Jugadores (0)");
     private final ListView<String> playersList = new ListView<>();
     private final ModsPane modsPane;
+    private final PlayersPane playersPane;
+    private final BackupsPane backupsPane;
+    private final StatsPane statsPane;
 
     // La consola recibe líneas desde un hilo de fondo: se agrupan para no saturar el hilo de JavaFX.
     private final ConcurrentLinkedQueue<String> pending = new ConcurrentLinkedQueue<>();
     private final AtomicBoolean flushScheduled = new AtomicBoolean();
 
-    public ServerPane(ServerInstance instance, HostServices host) {
+    /**
+     * @param onEdited  tras guardar ajustes nuevos (la app rehace el panel)
+     * @param onDeleted tras borrar el servidor
+     */
+    public ServerPane(ServerInstance instance, HostServices host, Consumer<ServerInstance> onEdited,
+                      Consumer<ServerInstance> onDeleted) {
         this.instance = instance;
         this.host = host;
+        this.onEdited = onEdited;
+        this.onDeleted = onDeleted;
         this.process = new ServerProcess(instance);
-        this.modsPane = instance.config().type().supportsMods() ? new ModsPane(instance, host) : null;
+        this.modsPane = instance.config().type().supportsAddons() ? new ModsPane(instance, host) : null;
+        this.playersPane = new PlayersPane(instance, process);
+        this.backupsPane = new BackupsPane(instance, process, host, this::appendLine);
+        this.statsPane = new StatsPane(instance, process, s -> statsLabel.setText(s));
 
         setTop(buildHeader());
         setCenter(buildCenter());
@@ -75,11 +106,20 @@ public final class ServerPane extends BorderPane {
 
         process.onOutput(this::appendLine);
         process.onStatus(s -> Platform.runLater(() -> updateStatus(s)));
-        process.onPlayers(p -> Platform.runLater(() -> updatePlayers(p)));
+        process.onPlayers(p -> Platform.runLater(() -> {
+            updatePlayers(p);
+            playersPane.updateOnline(p);
+        }));
         updateStatus(Status.STOPPED);
     }
 
     public boolean isRunning() { return process.isAlive(); }
+
+    /** Para las tareas de fondo del panel (medición y copias automáticas) cuando se descarta. */
+    public void dispose() {
+        statsPane.dispose();
+        backupsPane.dispose();
+    }
 
     public void stopAndWait() {
         try {
@@ -99,37 +139,46 @@ public final class ServerPane extends BorderPane {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         statusLabel.getStyleClass().add(Styles.TITLE_4);
-        HBox titleRow = new HBox(12, name, spacer, statusLabel);
+        statsLabel.getStyleClass().addAll(Styles.TEXT_MUTED, Styles.TEXT_SMALL);
+        HBox titleRow = new HBox(12, name, spacer, statsLabel, statusLabel);
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
-        Label meta = new Label(String.format("%s %s · %.1f GB RAM · puerto %d",
-                c.type().displayName, c.mcVersion(), c.ramMb() / 1024.0, c.port()));
+        Label meta = new Label(String.format("%s %s%s · %.1f GB RAM · puerto %d",
+                c.type().displayName, c.mcVersion(),
+                instance.loaderVersion() != null && c.type() != ServerType.FABRIC ? " (" + instance.loaderVersion() + ")" : "",
+                c.ramMb() / 1024.0, c.port()));
         meta.getStyleClass().add(Styles.TEXT_MUTED);
 
         startBtn.getStyleClass().add(Styles.SUCCESS);
         stopBtn.getStyleClass().add(Styles.DANGER);
         startBtn.setOnAction(e -> start());
         stopBtn.setOnAction(e -> process.stop());
-        backupBtn.setOnAction(e -> backup());
+        backupBtn.setOnAction(e -> backupsPane.backupNow(Backups.MANUAL));
         folderBtn.setOnAction(e -> host.showDocument(instance.dir().toUri().toString()));
-        HBox buttons = new HBox(8, startBtn, stopBtn, backupBtn, folderBtn);
+        editItem.setOnAction(e -> new EditServerDialog(getScene().getWindow(), instance, onEdited).show());
+        deleteItem.setOnAction(e -> deleteServer());
+        settingsMenu.getItems().setAll(editItem, new SeparatorMenuItem(), deleteItem);
+        settingsMenu.setTooltip(new Tooltip("Ajustes y borrar"));
+        Region btnSpacer = new Region();
+        HBox.setHgrow(btnSpacer, Priority.ALWAYS);
+        HBox buttons = new HBox(8, startBtn, stopBtn, backupBtn, folderBtn, btnSpacer, settingsMenu);
 
         VBox header = new VBox(8, titleRow, meta, buttons, connectionInfo(c));
         header.setPadding(new Insets(0, 0, 12, 0));
         return header;
     }
 
-    /** Consola y jugadores; en servidores con mods, además una pestaña para gestionarlos. */
     private javafx.scene.Node buildCenter() {
         BorderPane consoleTab = new BorderPane(buildConsole());
         consoleTab.setRight(buildPlayers());
-        if (modsPane == null) return consoleTab;
-
         consoleTab.setPadding(new Insets(12, 0, 0, 0));
-        modsPane.setPadding(new Insets(12, 0, 0, 0));
-        Tab console = new Tab("Consola", consoleTab);
-        Tab mods = new Tab("Mods", modsPane);
-        TabPane tabs = new TabPane(console, mods);
+        TabPane tabs = new TabPane(new Tab("Consola", consoleTab));
+        if (modsPane != null) {
+            modsPane.setPadding(new Insets(12, 0, 0, 0));
+            tabs.getTabs().add(new Tab(instance.config().type().supportsPlugins() ? "Plugins" : "Mods", modsPane));
+        }
+        tabs.getTabs().addAll(new Tab("Jugadores", playersPane), new Tab("Copias", backupsPane),
+                new Tab("Rendimiento", statsPane));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         return tabs;
     }
@@ -139,7 +188,7 @@ public final class ServerPane extends BorderPane {
         String lan = ips.isEmpty() ? "—" : String.join(", ", ips.stream().map(ip -> ip + ":" + c.port()).toList());
         String extra = c.type().supportsMods()
                 ? "\nMods: gestiónalos en la pestaña «Mods» (los jugadores necesitan los mismos)."
-                : c.type().supportsPlugins() ? "\nPlugins: copia los .jar en la carpeta «plugins»." : "";
+                : c.type().supportsPlugins() ? "\nPlugins: búscalos e instálalos en la pestaña «Plugins»." : "";
         Label l = new Label("Desde este PC: localhost:" + c.port()
                 + "    ·    Desde tu red (Wi-Fi/cable): " + lan
                 + "\nAmigos fuera de tu casa: abre el puerto " + c.port()
@@ -202,8 +251,9 @@ public final class ServerPane extends BorderPane {
             long errors = new ModManager(instance).check().stream()
                     .filter(i -> i.severity() == CompatibilityChecker.Severity.ERROR).count();
             if (errors > 0) {
-                appendLine("[BlockHost] Aviso: hay " + errors + " problema(s) de compatibilidad entre mods. "
-                        + "Si el servidor no arranca, revisa la pestaña «Mods».");
+                String what = instance.config().type().supportsPlugins() ? "Plugins" : "Mods";
+                appendLine("[BlockHost] Aviso: hay " + errors + " problema(s) de compatibilidad entre "
+                        + what.toLowerCase() + ". Si el servidor no arranca, revisa la pestaña «" + what + "».");
             }
         } catch (IOException ignored) {
             // si no se pueden leer los mods, que lo diga Fabric al arrancar
@@ -222,21 +272,35 @@ public final class ServerPane extends BorderPane {
         instance.save();
     }
 
-    private void backup() {
-        backupBtn.setDisable(true);
-        appendLine("[BlockHost] Creando copia de seguridad...");
+    /** Borrar no se puede deshacer: hay que escribir el nombre del servidor para confirmarlo. */
+    private void deleteServer() {
+        if (process.isAlive()) return;
+        String name = instance.config().name();
+        TextInputDialog d = new TextInputDialog();
+        d.initOwner(getScene().getWindow());
+        d.setTitle("Borrar servidor");
+        d.setHeaderText("¿Borrar «" + name + "» para siempre?");
+        d.setContentText("Se borrará su carpeta entera: el mundo, los " + (instance.config().type().supportsPlugins() ? "plugins" : "mods")
+                + " y las copias de seguridad. No se puede deshacer.\n\nEscribe el nombre del servidor para confirmar:");
+        d.getDialogPane().setPrefWidth(520);
+        Button ok = (Button) d.getDialogPane().lookupButton(ButtonType.OK);
+        ok.setText("Borrar");
+        ok.getStyleClass().add(Styles.DANGER);
+        ok.disableProperty().bind(d.getEditor().textProperty().isNotEqualTo(name));
+        if (d.showAndWait().isEmpty()) return;
+        setDisable(true);
         runInBackground(() -> {
             try {
-                if (process.isAlive()) {
-                    process.send("save-all flush");
-                    Thread.sleep(3000); // margen para que el servidor escriba el mundo a disco
-                }
-                Path zip = Backups.create(instance);
-                appendLine("[BlockHost] Copia guardada en backups/" + zip.getFileName());
+                ServerRegistry.delete(instance);
+                Platform.runLater(() -> onDeleted.accept(instance));
             } catch (Exception ex) {
-                appendLine("[BlockHost] Error en la copia: " + ex.getMessage());
-            } finally {
-                Platform.runLater(() -> backupBtn.setDisable(false));
+                Platform.runLater(() -> {
+                    setDisable(false);
+                    UiTasks.error(getScene().getWindow(), "No se pudo borrar del todo", ex.getMessage()
+                            + "\n\nPuede que algún archivo esté abierto en otro programa. Lo que quede está en "
+                            + instance.dir());
+                    onDeleted.accept(instance);
+                });
             }
         });
     }
@@ -273,6 +337,11 @@ public final class ServerPane extends BorderPane {
         input.setDisable(!alive);
         sendBtn.setDisable(!alive);
         if (modsPane != null) modsPane.setServerRunning(alive);
+        playersPane.setServerRunning(alive);
+        backupsPane.setServerRunning(alive);
+        editItem.setDisable(alive);
+        deleteItem.setDisable(alive);
+        settingsMenu.setTooltip(new Tooltip(alive ? "Detén el servidor para cambiar ajustes o borrarlo" : "Ajustes y borrar"));
     }
 
     private void updatePlayers(Set<String> players) {

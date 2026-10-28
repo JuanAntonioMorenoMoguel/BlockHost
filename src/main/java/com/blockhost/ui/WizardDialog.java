@@ -133,7 +133,7 @@ public final class WizardDialog extends Stage {
         VBox.setVgrow(stepHolder, Priority.ALWAYS);
 
         BorderPane root = new BorderPane(center, header, null, buttons, null);
-        setScene(new Scene(root, 620, 560));
+        setScene(new Scene(root, 620, 600));
         setOnCloseRequest(e -> { if (installing) e.consume(); });
 
         go(0);
@@ -152,6 +152,7 @@ public final class WizardDialog extends Stage {
             Label desc = new Label(t.description);
             desc.getStyleClass().addAll(Styles.TEXT_MUTED, Styles.TEXT_SMALL);
             desc.setWrapText(true);
+            desc.setMinHeight(Region.USE_PREF_SIZE);
             desc.setPadding(new Insets(0, 0, 0, 26));
             types.getChildren().add(new VBox(2, rb, desc));
         }
@@ -269,7 +270,7 @@ public final class WizardDialog extends Stage {
             case 0 -> {
                 String n = nameField.getText().trim();
                 if (n.isEmpty()) return "Ponle un nombre al servidor.";
-                if (ServerRegistry.exists(n)) return "Ya tienes un servidor con ese nombre.";
+                if (ServerRegistry.nameTaken(n, null)) return "Ya tienes un servidor con ese nombre.";
             }
             case 1 -> {
                 if (versionList.getSelectionModel().getSelectedItem() == null) return "Elige una versión.";
@@ -403,14 +404,14 @@ public final class WizardDialog extends Stage {
         t.start();
     }
 
-    private static Map<String, String> labels(String... kv) {
+    static Map<String, String> labels(String... kv) {
         Map<String, String> m = new LinkedHashMap<>();
         for (int i = 0; i < kv.length; i += 2) m.put(kv[i], kv[i + 1]);
         return m;
     }
 
     /** ComboBox cuyo valor es la clave de server.properties y muestra el texto en español. */
-    private static ComboBox<String> choice(Map<String, String> labels, String def) {
+    static ComboBox<String> choice(Map<String, String> labels, String def) {
         ComboBox<String> box = new ComboBox<>();
         box.getItems().setAll(labels.keySet());
         box.setConverter(new StringConverter<>() {

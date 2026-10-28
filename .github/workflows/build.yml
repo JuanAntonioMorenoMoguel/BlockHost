@@ -1,0 +1,66 @@
+name: Build
+
+# Tests en cada push y PR; en Windows además se genera el instalador (.exe) y la versión portable (.zip),
+# que se pueden descargar desde la pestaña «Actions» de cada ejecución. Al subir una etiqueta v*
+# (p. ej. v0.2.0) se publican también como Release.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test --no-daemon
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: WiX Toolset 3 (lo usa jpackage para el instalador)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            $wix = Get-ChildItem 'C:\Program Files (x86)' -Filter 'WiX Toolset v3*' -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $wix) {
+              choco install wixtoolset --no-progress -y
+              $wix = Get-ChildItem 'C:\Program Files (x86)' -Filter 'WiX Toolset v3*' -Directory | Select-Object -First 1
+            }
+            "$($wix.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+      - name: Instalador y app portable
+        run: ./gradlew installer app --no-daemon
+      - name: Comprimir la app portable
+        shell: pwsh
+        run: Compress-Archive -Path build/jpackage/BlockHost -DestinationPath build/jpackage/BlockHost-portable.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BlockHost-Windows
+          path: |
+            build/jpackage/*.exe
+            build/jpackage/BlockHost-portable.zip
+          if-no-files-found: error
+      - name: Publicar Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/jpackage/*.exe
+            build/jpackage/BlockHost-portable.zip

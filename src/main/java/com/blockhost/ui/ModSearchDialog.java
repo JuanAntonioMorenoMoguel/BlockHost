@@ -2,7 +2,6 @@ package com.blockhost.ui;
 
 import atlantafx.base.theme.Styles;
 import com.blockhost.core.mods.Modrinth;
-import com.blockhost.core.mods.ModManager;
 import com.blockhost.core.mods.ModRepository;
 import com.blockhost.core.mods.ModRepository.Project;
 import javafx.application.HostServices;
@@ -30,10 +29,11 @@ import javafx.stage.Window;
 import java.util.List;
 import java.util.function.Consumer;
 
-/** Buscador de mods o modpacks de Fabric en Modrinth, con sus iconos. Devuelve el proyecto elegido. */
+/** Buscador de mods, plugins o modpacks en Modrinth, con sus iconos. Devuelve el proyecto elegido. */
 public final class ModSearchDialog extends Stage {
 
     private final String projectType;
+    private final List<String> loaders;
     private final String mcVersion;
     private final HostServices host;
     private final Consumer<Project> onPick;
@@ -47,27 +47,40 @@ public final class ModSearchDialog extends Stage {
     private int searchSeq = 0;
 
     /**
-     * @param projectType "mod" o "modpack"
+     * @param projectType "mod", "plugin" o "modpack"
+     * @param loaders     loaders de Modrinth aceptados (p. ej. ["forge"])
+     * @param platform    nombre para los textos: "Fabric", "Paper"...
      * @param mcVersion   solo resultados para esa versión de Minecraft; null = cualquiera
      */
-    public ModSearchDialog(Window owner, HostServices host, String projectType, String mcVersion, Consumer<Project> onPick) {
+    public ModSearchDialog(Window owner, HostServices host, String projectType, List<String> loaders, String platform,
+                           String mcVersion, Consumer<Project> onPick) {
         this.projectType = projectType;
+        this.loaders = loaders;
         this.mcVersion = mcVersion;
         this.host = host;
         this.onPick = onPick;
         initOwner(owner);
         initModality(Modality.WINDOW_MODAL);
-        boolean mods = projectType.equals("mod");
-        setTitle(mods ? "Buscar mods en Modrinth" : "Buscar modpacks en Modrinth");
+        String plural = switch (projectType) {
+            case "mod" -> "mods";
+            case "plugin" -> "plugins";
+            default -> "modpacks";
+        };
+        setTitle("Buscar " + plural + " en Modrinth");
 
-        Label info = new Label((mods ? "Mods de Fabric para servidor" : "Modpacks de Fabric")
+        Label info = new Label(Character.toUpperCase(plural.charAt(0)) + plural.substring(1) + " de " + platform
+                + (projectType.equals("mod") ? " para servidor" : "")
                 + (mcVersion != null ? " · Minecraft " + mcVersion : "")
                 + ". Las dependencias se instalan solas y se comprueba la compatibilidad antes de tocar nada.");
         info.getStyleClass().addAll(Styles.TEXT_MUTED, Styles.TEXT_SMALL);
         info.setWrapText(true);
         info.setMinHeight(Region.USE_PREF_SIZE);
 
-        query.setPromptText(mods ? "p. ej. lithium, voice chat, waystones..." : "p. ej. Fabulously Optimized, Cobblemon...");
+        query.setPromptText(switch (projectType) {
+            case "mod" -> "p. ej. lithium, voice chat, waystones...";
+            case "plugin" -> "p. ej. LuckPerms, EssentialsX, Chunky...";
+            default -> "p. ej. Cobblemon, All of Create, Better MC...";
+        });
         query.setOnKeyPressed(e -> { if (e.getCode() == KeyCode.ENTER) search(); });
         searchBtn.setOnAction(e -> search());
         HBox.setHgrow(query, Priority.ALWAYS);
@@ -114,7 +127,7 @@ public final class ModSearchDialog extends Stage {
         searchBtn.setDisable(true);
         UiTasks.run(() -> {
             try {
-                List<Project> found = repo.search(q, projectType, ModManager.LOADER, mcVersion, 30);
+                List<Project> found = repo.search(q, projectType, loaders, mcVersion, 30);
                 Platform.runLater(() -> {
                     if (seq != searchSeq) return;
                     results.getItems().setAll(found);

@@ -24,11 +24,11 @@ public final class Modrinth implements ModRepository {
 
     /** Los mods que solo funcionan en el cliente se excluyen: en un servidor no sirven. */
     @Override
-    public List<Project> search(String query, String projectType, String loader, String mcVersion, int limit)
+    public List<Project> search(String query, String projectType, List<String> loaders, String mcVersion, int limit)
             throws Exception {
         List<List<String>> facets = new ArrayList<>();
         facets.add(List.of("project_type:" + projectType));
-        if (loader != null) facets.add(List.of("categories:" + loader));
+        if (loaders != null && !loaders.isEmpty()) facets.add(loaders.stream().map(l -> "categories:" + l).toList());
         if (mcVersion != null) facets.add(List.of("versions:" + mcVersion));
         if (projectType.equals("mod")) facets.add(List.of("server_side:required", "server_side:optional"));
         String url = API + "/search?limit=" + limit + "&index=relevance"
@@ -46,9 +46,11 @@ public final class Modrinth implements ModRepository {
     }
 
     @Override
-    public List<Version> versions(String idOrSlug, String loader, String mcVersion) throws Exception {
+    public List<Version> versions(String idOrSlug, List<String> loaders, String mcVersion) throws Exception {
         StringBuilder url = new StringBuilder(API + "/project/" + enc(idOrSlug) + "/version?");
-        if (loader != null) url.append("loaders=").append(enc("[\"" + loader + "\"]")).append('&');
+        if (loaders != null && !loaders.isEmpty()) {
+            url.append("loaders=").append(enc(Json.write(new ArrayList<Object>(loaders)).replace("\n", ""))).append('&');
+        }
         if (mcVersion != null) url.append("game_versions=").append(enc("[\"" + mcVersion + "\"]"));
         Object o = Http.getJsonOrNull(url.toString());
         List<Version> out = new ArrayList<>();
@@ -71,6 +73,23 @@ public final class Modrinth implements ModRepository {
         body.put("hashes", new ArrayList<Object>(sha1s));
         body.put("algorithm", "sha1");
         Json.obj(Http.postJson(API + "/version_files", body))
+                .forEach((hash, v) -> out.put(hash, version(Json.obj(v))));
+        return out;
+    }
+
+    /**
+     * La versión más reciente de cada fichero para esos loaders y esa versión de Minecraft: sha1 -> versión.
+     * Si la más reciente es la que ya tienes, viene la misma; los que no son de Modrinth no salen.
+     */
+    public Map<String, Version> latestByHash(List<String> sha1s, List<String> loaders, String mcVersion) throws Exception {
+        Map<String, Version> out = new LinkedHashMap<>();
+        if (sha1s.isEmpty()) return out;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("hashes", new ArrayList<Object>(sha1s));
+        body.put("algorithm", "sha1");
+        body.put("loaders", new ArrayList<Object>(loaders));
+        body.put("game_versions", new ArrayList<Object>(List.of(mcVersion)));
+        Json.obj(Http.postJson(API + "/version_files/update", body))
                 .forEach((hash, v) -> out.put(hash, version(Json.obj(v))));
         return out;
     }

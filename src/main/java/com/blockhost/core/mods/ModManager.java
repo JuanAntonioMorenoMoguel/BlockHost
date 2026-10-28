@@ -7,9 +7,11 @@ import com.blockhost.core.JavaRuntimeManager;
 import com.blockhost.core.Json;
 import com.blockhost.core.ProgressListener;
 import com.blockhost.core.ServerInstance;
+import com.blockhost.core.ServerType;
 import com.blockhost.core.mods.CompatibilityChecker.Environment;
 import com.blockhost.core.mods.CompatibilityChecker.Issue;
 import com.blockhost.core.providers.FabricProvider;
+import com.blockhost.core.providers.ForgeProvider;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -34,22 +36,31 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Mods de un servidor Fabric: listar, activar/desactivar, quitar, añadir .jar propios, instalar desde Modrinth
- * resolviendo dependencias, e instalar modpacks .mrpack. Todo lo nuevo se descarga primero a una carpeta
- * temporal y se comprueba su compatibilidad antes de tocar la carpeta mods.
+ * Mods de un servidor Fabric, Forge o NeoForge, o plugins de un servidor Paper: listar, activar/desactivar,
+ * quitar, añadir .jar propios, instalar y actualizar desde Modrinth resolviendo dependencias, e instalar
+ * modpacks .mrpack. Todo lo nuevo se descarga primero a una carpeta temporal y se comprueba su compatibilidad
+ * antes de tocar la carpeta mods (o plugins).
  */
 public final class ModManager {
 
-    public static final String LOADER = "fabric";
     private static final String STORE = "blockhost-mods.json";
     private static final Pattern JAVA_DIR = Pattern.compile("java-(\\d+)");
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final ServerInstance instance;
+    private final ServerType type;
 
-    public ModManager(ServerInstance instance) { this.instance = instance; }
+    public ModManager(ServerInstance instance) {
+        this.instance = instance;
+        this.type = instance.config().type();
+    }
 
-    public Path modsDir() throws IOException { return Files.createDirectories(instance.dir().resolve("mods")); }
+    public ServerType type() { return type; }
+
+    /** Loaders con los que se busca en Modrinth para este servidor. */
+    public List<String> loaders() { return type.modrinthLoaders(); }
+
+    public Path modsDir() throws IOException { return Files.createDirectories(instance.dir().resolve(type.addonFolder())); }
 
     // ---------------- estado ----------------
 
@@ -61,28 +72,29 @@ public final class ModManager {
                 String n = f.getFileName().toString();
                 boolean enabled = n.endsWith(".jar");
                 if (!enabled && !n.endsWith(".jar" + InstalledMod.DISABLED_SUFFIX)) continue;
-                out.add(read(f, enabled, sources));
+                out.add(read(f, enabled, sources, type.addonLoader()));
             }
         }
         out.sort(Comparator.comparing(m -> m.displayName().toLowerCase()));
         return out;
     }
 
-    private static InstalledMod read(Path f, boolean enabled, Map<String, ModSource> sources) {
+    private static InstalledMod read(Path f, boolean enabled, Map<String, ModSource> sources, ModMetadata.Loader prefer) {
         String jar = f.getFileName().toString().replaceFirst("\\.disabled$", "");
         try {
-            return new InstalledMod(f, enabled, ModMetadata.read(f), null, sources.get(jar));
+            return new InstalledMod(f, enabled, ModMetadata.read(f, prefer), null, sources.get(jar));
         } catch (IOException e) {
             return new InstalledMod(f, enabled, null, e.getMessage(), sources.get(jar));
         }
     }
 
-    /** Minecraft, Fabric Loader y Java del servidor, para comprobar los rangos que piden los mods. */
+    /** Minecraft, loader y Java del servidor, para comprobar los rangos que piden los mods. */
     public Environment environment() {
-        String loader = instance.loaderVersion() != null ? instance.loaderVersion() : detectLoader();
+        String loader = instance.loaderVersion() != null ? instance.loaderVersion()
+                : type == ServerType.FABRIC ? detectLoader() : null;
         Matcher m = JAVA_DIR.matcher(String.valueOf(instance.javaPath()));
         int java = m.find() ? Integer.parseInt(m.group(1)) : 0;
-        return new Environment(instance.config().mcVersion(), loader, java);
+        return new Environment(type.addonLoader(), instance.config().mcVersion(), loader, java);
     }
 
     /** Servidores creados antes de guardar loaderVersion: se deduce de las librerías que baja el lanzador. */
@@ -130,7 +142,11 @@ public final class ModManager {
      * @param introduced problemas que aparecerían al instalarlos y que hoy no existen
      * @param notes      avisos de la preparación (dependencias opcionales, mods de cliente omitidos...)
      */
-    public record Staged(Path dir, List<StagedFile> files, List<Issue> introduced, List<String> notes) {
+    public record Staged(Path dir, List<StagedFile> files, List<Issue> introduced, List<String> notes, List<Path> replaces) {
+        public Staged(Path dir, List<StagedFile> files, List<Issue> introduced, List<String> notes) {
+            this(dir, files, introduced, notes, List.of());
+        }
+
         public boolean breaksSomething() { return CompatibilityChecker.hasErrors(introduced); }
     }
 
@@ -157,7 +173,7 @@ public final class ModManager {
         try {
             Set<String> installedIds = new HashSet<>();
             for (InstalledMod m : list()) {
-                if (m.enabled() && m.meta() != null && m.meta().id() != null) installedIds.add(m.meta().id());
+                if (m.enabled() && m.meta() != null && m.meta().id() != null) installedIds.add(m.meta().id().toLowerCase());
             }
             int i = 0;
             for (InstallPlan.Item it : plan.items()) {
@@ -166,7 +182,8 @@ public final class ModManager {
                 p.onProgress("Descargando " + it.project().title() + " (" + (++i) + "/" + plan.items().size() + ")", -1);
                 Http.download(f.url(), target, it.project().title(), p);
                 Hashes.verify(target, f.sha1(), f.sha512());
-                if (it.requiredBy() != null && installedIds.contains(modId(target))) {
+                String id = modId(target);
+                if (it.requiredBy() != null && id != null && installedIds.contains(id.toLowerCase())) {
                     Files.delete(target);
                     notes.add(it.project().title() + " (que pide " + it.requiredBy() + ") ya lo tienes instalado.");
                     continue;
@@ -181,32 +198,42 @@ public final class ModManager {
         return evaluate(dir, files, notes);
     }
 
-    private static String modId(Path jar) {
+    private String modId(Path jar) {
         try {
-            return ModMetadata.read(jar).id();
+            return ModMetadata.read(jar, type.addonLoader()).id();
         } catch (IOException e) {
             return null;
         }
     }
 
     private Staged evaluate(Path dir, List<StagedFile> files, List<String> notes) throws IOException {
+        return evaluate(dir, files, notes, List.of());
+    }
+
+    /** @param replaces ficheros instalados que desaparecen al confirmar (las versiones viejas de una actualización) */
+    private Staged evaluate(Path dir, List<StagedFile> files, List<String> notes, List<Path> replaces) throws IOException {
         List<InstalledMod> current = list();
         List<InstalledMod> after = new ArrayList<>(current);
         Set<String> names = new HashSet<>();
         for (StagedFile f : files) names.add(f.file().getFileName().toString());
-        after.removeIf(m -> names.contains(m.jarName())); // mismo nombre de fichero = se sustituye
-        for (StagedFile f : files) after.add(read(f.file(), true, Map.of()));
+        after.removeIf(m -> names.contains(m.jarName()) || replaces.contains(m.file())); // mismo nombre = se sustituye
+        for (StagedFile f : files) after.add(read(f.file(), true, Map.of(), type.addonLoader()));
         Environment env = environment();
         List<Issue> introduced = CompatibilityChecker.introduced(
                 CompatibilityChecker.check(current, env), CompatibilityChecker.check(after, env));
-        return new Staged(dir, files, introduced, notes);
+        return new Staged(dir, files, introduced, notes, replaces);
     }
 
-    /** Pasa los ficheros preparados a la carpeta mods y recuerda su origen. */
+    /** Pasa los ficheros preparados a la carpeta mods, quita los que sustituyen y recuerda su origen. */
     public synchronized void commit(Staged staged) throws IOException {
         Path mods = modsDir();
         Map<String, Object> store = store();
         Map<String, Object> sources = Json.obj(store.computeIfAbsent("mods", k -> new LinkedHashMap<String, Object>()));
+        for (Path old : staged.replaces()) {
+            String n = old.getFileName().toString().replaceFirst("\\.disabled$", "");
+            Files.deleteIfExists(old);
+            sources.remove(n);
+        }
         for (StagedFile f : staged.files()) {
             String name = f.file().getFileName().toString();
             Files.deleteIfExists(mods.resolve(name + InstalledMod.DISABLED_SUFFIX));
@@ -224,6 +251,70 @@ public final class ModManager {
         } catch (IOException ignored) {
             // es la caché: se limpiará en otra ocasión
         }
+    }
+
+    // ---------------- actualizaciones ----------------
+
+    /** Una versión más nueva en Modrinth de un mod instalado. */
+    public record Update(InstalledMod mod, ModRepository.Version version) {
+        @Override
+        public String toString() {
+            return mod.displayName() + "  " + mod.version() + "  →  " + version.versionNumber();
+        }
+    }
+
+    /**
+     * Busca versiones más nuevas de los mods activos para este Minecraft y loader. Solo se pueden actualizar
+     * los que están en Modrinth (se reconocen por la huella del fichero, aunque se añadieran a mano).
+     * Si tienes una versión estable, no se ofrecen betas.
+     */
+    public List<Update> checkUpdates(ProgressListener p) throws Exception {
+        p.onProgress("Buscando actualizaciones en Modrinth...", -1);
+        Map<String, InstalledMod> byHash = new LinkedHashMap<>();
+        for (InstalledMod m : list()) if (m.enabled()) byHash.put(Hashes.sha1(m.file()), m);
+        if (byHash.isEmpty()) return List.of();
+        List<String> hashes = new ArrayList<>(byHash.keySet());
+        Map<String, ModRepository.Version> current = Modrinth.INSTANCE.versionsByHash(hashes);
+        Map<String, ModRepository.Version> latest = Modrinth.INSTANCE.latestByHash(hashes, loaders(),
+                instance.config().mcVersion());
+        List<Update> out = new ArrayList<>();
+        for (Map.Entry<String, ModRepository.Version> e : latest.entrySet()) {
+            InstalledMod mod = byHash.get(e.getKey());
+            ModRepository.Version v = e.getValue();
+            if (mod == null || v.file() == null || v.file().url() == null) continue;
+            if (e.getKey().equalsIgnoreCase(v.file().sha1())) continue; // ya es la última
+            ModRepository.Version now = current.get(e.getKey());
+            if (now != null && now.id().equals(v.id())) continue;
+            if (now != null && "release".equals(now.versionType()) && !"release".equals(v.versionType())) continue;
+            out.add(new Update(mod, v));
+        }
+        out.sort(Comparator.comparing(u -> u.mod().displayName().toLowerCase()));
+        return out;
+    }
+
+    /** Descarga las versiones nuevas y comprueba cómo queda todo sin las viejas. Se confirma con commit. */
+    public Staged stageUpdates(List<Update> updates, ProgressListener p) throws Exception {
+        Path dir = newStagingDir();
+        List<StagedFile> files = new ArrayList<>();
+        List<Path> replaces = new ArrayList<>();
+        try {
+            int i = 0;
+            for (Update u : updates) {
+                ModRepository.File f = u.version().file();
+                Path target = Mrpack.safeResolve(dir, f.fileName());
+                p.onProgress("Descargando " + u.mod().displayName() + " " + u.version().versionNumber()
+                        + " (" + (++i) + "/" + updates.size() + ")", -1);
+                Http.download(f.url(), target, u.mod().displayName(), p);
+                Hashes.verify(target, f.sha1(), f.sha512());
+                files.add(new StagedFile(target, new ModSource("modrinth", u.version().projectId(), u.version().id(),
+                        u.mod().displayName(), "modrinth")));
+                replaces.add(u.mod().file());
+            }
+        } catch (Exception e) {
+            JavaRuntimeManager.deleteRecursively(dir);
+            throw e;
+        }
+        return evaluate(dir, files, List.of(), replaces);
     }
 
     // ---------------- Modrinth ----------------
@@ -275,17 +366,18 @@ public final class ModManager {
             ModRepository.Version v = null;
             if (next[1] != null) {
                 ModRepository.Version pinned = repo.version(project.id(), next[1]);
-                if (pinned != null && pinned.gameVersions().contains(mc) && pinned.loaders().contains(LOADER)) v = pinned;
+                if (pinned != null && pinned.gameVersions().contains(mc)
+                        && pinned.loaders().stream().anyMatch(loaders()::contains)) v = pinned;
             }
-            if (v == null) v = ModRepository.best(repo.versions(project.id(), LOADER, mc));
+            if (v == null) v = ModRepository.best(repo.versions(project.id(), loaders(), mc));
             String who = requestedBy != null ? " (lo necesita " + requestedBy + ")" : "";
             if (v == null || v.file() == null) {
-                problems.add(project.title() + who + " no tiene versión para Fabric y Minecraft " + mc + ".");
+                problems.add(project.title() + who + " no tiene versión para " + type.displayName + " y Minecraft " + mc + ".");
                 continue;
             }
             if (v.file().url() == null) {
                 problems.add(project.title() + who + " no tiene enlace de descarga. Bájalo de "
-                        + project.pageUrl() + " y añádelo con «Añadir .jar».");
+                        + project.pageUrl() + " y añádelo con «Añadir .jar desde tu PC».");
                 continue;
             }
             items.add(new InstallPlan.Item(project, v, requestedBy));
@@ -316,11 +408,15 @@ public final class ModManager {
         return new InstallPlan(items, problems, notes);
     }
 
-    /** Ids de los mods que faltan según la comprobación. En Fabric suelen coincidir con el slug de Modrinth. */
+    /**
+     * Ids de los mods que faltan según la comprobación. Suelen coincidir con el slug de Modrinth (los nombres
+     * de plugin, en minúsculas).
+     */
     public static List<String> missingDependencies(List<Issue> issues) {
         List<String> ids = new ArrayList<>();
         for (Issue i : issues) {
-            if (i.missingId() != null && !ids.contains(i.missingId())) ids.add(i.missingId());
+            String id = i.missingId() == null ? null : i.missingId().toLowerCase().replace(' ', '-');
+            if (id != null && !ids.contains(id)) ids.add(id);
         }
         return ids;
     }
@@ -362,9 +458,13 @@ public final class ModManager {
     public List<String> modpackBlockers(Mrpack.Pack pack) {
         List<String> out = new ArrayList<>();
         String loader = pack.loader();
-        if (!LOADER.equals(loader)) {
+        ServerType packType = ServerType.forModpackLoader(loader);
+        if (packType == null) {
             out.add("El modpack usa " + (loader == null ? "Minecraft sin mods" : loader)
-                    + " y BlockHost de momento solo instala modpacks de Fabric.");
+                    + " y BlockHost instala modpacks de Fabric, Forge y NeoForge.");
+        } else if (packType != type) {
+            out.add("El modpack es para " + packType.displayName + " y este servidor es " + type.displayName
+                    + ". Crea un servidor nuevo desde el modpack.");
         }
         if (!pack.mcVersion().equals(instance.config().mcVersion())) {
             out.add("El modpack es para Minecraft " + pack.mcVersion() + " y este servidor es "
@@ -374,7 +474,7 @@ public final class ModManager {
     }
 
     /**
-     * Instala el modpack: descarga sus mods de servidor, pone la versión de Fabric Loader que pide y
+     * Instala el modpack: descarga sus mods de servidor, pone la versión del loader que pide y
      * aplica sus overrides. Los mods que hubiera se apartan a una carpeta "mods-antes-de-..." por si acaso.
      *
      * @return problemas de compatibilidad tras instalarlo
@@ -389,8 +489,14 @@ public final class ModManager {
 
             String loader = pack.loaderVersion();
             if (loader != null && !loader.equals(environment().loaderVersion())) {
-                p.onProgress("Instalando Fabric Loader " + loader + " (el que pide el modpack)...", -1);
-                FabricProvider.installLoader(pack.mcVersion(), loader, instance.dir(), p);
+                p.onProgress("Instalando " + type.displayName + " " + loader + " (el que pide el modpack)...", -1);
+                if (type == ServerType.FABRIC) {
+                    FabricProvider.installLoader(pack.mcVersion(), loader, instance.dir(), p);
+                } else {
+                    ForgeProvider.Flavor flavor = type == ServerType.FORGE ? ForgeProvider.Flavor.FORGE : ForgeProvider.Flavor.NEOFORGE;
+                    instance.setJarName(ForgeProvider.install(flavor, pack.mcVersion(), loader, instance.dir(),
+                            instance.javaPath(), p));
+                }
                 instance.setLoaderVersion(loader);
                 instance.save();
             }

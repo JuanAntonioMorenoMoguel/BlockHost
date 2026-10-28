@@ -66,4 +66,20 @@ class VersionPredicateTest {
         assertTrue(m("mc1.21-abc", "mc1.21-abc"));
         assertFalse(m("mc1.21-abc", ">=1.0"));
     }
+
+    @Test
+    void mavenRangesFromForge() {
+        assertTrue(m("1.20.1", "[1.20.1,1.21)"));
+        assertTrue(m("1.20.6", "[1.20,1.21)"));
+        assertFalse(m("1.21", "[1.20,1.21)"));
+        assertTrue(m("47.3.0", "[47,)"));
+        assertFalse(m("46.0.1", "[47,)"));
+        assertTrue(m("1.0", "[1.0]"));
+        assertFalse(m("1.0.1", "[1.0]"));
+        assertTrue(m("2.0", "(,2.0]"));
+        assertFalse(m("2.0", "(,2.0)"));
+        assertTrue(m("3.5", "[1.0,2.0),[3.0,)"));
+        assertFalse(m("2.5", "[1.0,2.0),[3.0,)"));
+        assertTrue(m("21.1.77", "[21.1.0-beta,)"));
+    }
 }
