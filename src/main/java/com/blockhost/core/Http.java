@@ -67,7 +67,7 @@ public final class Http {
         if (r.statusCode() == 200) return;
         if (r.statusCode() == 401 || r.statusCode() == 403) {
             throw new IOException("Acceso denegado (HTTP " + r.statusCode() + ") al consultar " + URI.create(url).getHost()
-                    + ". Si es CurseForge, revisa la clave de API.");
+                    + ".");
         }
         throw new IOException("HTTP " + r.statusCode() + " al consultar " + url);
     }

@@ -2,15 +2,12 @@ package com.blockhost.core.mods;
 
 import java.util.List;
 
-/** Un sitio de donde descargar mods y modpacks (Modrinth, CurseForge) con un modelo común. */
+/** Un sitio de donde descargar mods y modpacks (hoy, Modrinth) con un modelo común. */
 public interface ModRepository {
 
-    String id();          // "modrinth" | "curseforge"
+    String id();          // "modrinth"
 
     String displayName();
-
-    /** false si falta configuración (CurseForge necesita una clave de API). */
-    boolean available();
 
     /**
      * Busca mods o modpacks compatibles con el loader y la versión de Minecraft (null = cualquiera).
@@ -33,16 +30,10 @@ public interface ModRepository {
         return versions.isEmpty() ? null : versions.get(0);
     }
 
-    static ModRepository byId(String id) {
-        return "curseforge".equals(id) ? CurseForge.INSTANCE : Modrinth.INSTANCE;
-    }
-
-    static List<ModRepository> all() { return List.of(Modrinth.INSTANCE, CurseForge.INSTANCE); }
-
     // ---------------- modelo común ----------------
 
     /**
-     * @param clientOnly el servidor no lo carga (solo Modrinth lo sabe; en CurseForge siempre false)
+     * @param clientOnly el servidor no lo carga
      * @param clientToo  los jugadores también necesitan instalarlo
      */
     record Project(String repo, String id, String slug, String title, String description, String author,
@@ -52,7 +43,7 @@ public interface ModRepository {
         public String toString() { return title; }
     }
 
-    /** @param url null si el autor no permite descargarlo desde otras apps (pasa en CurseForge) */
+    /** @param url null si no hay enlace de descarga */
     record File(String url, String fileName, String sha1, String sha512, long size) { }
 
     /** @param type "required", "optional", "incompatible" o "embedded" */

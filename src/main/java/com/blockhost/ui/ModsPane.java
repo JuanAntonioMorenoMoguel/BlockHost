@@ -83,14 +83,14 @@ final class ModsPane extends VBox {
         lockedLabel.getStyleClass().addAll(Styles.WARNING, Styles.TEXT_SMALL);
 
         String mc = instance.config().mcVersion();
-        MenuItem searchMod = new MenuItem("Buscar mods (Modrinth o CurseForge)...");
+        MenuItem searchMod = new MenuItem("Buscar mods en Modrinth...");
         searchMod.setOnAction(e -> new ModSearchDialog(window(), host, "mod", mc,
-                p -> install(ModRepository.byId(p.repo()), List.of(p.id()))).show());
+                p -> install(Modrinth.INSTANCE, List.of(p.id()))).show());
         MenuItem localJar = new MenuItem("Añadir .jar desde tu PC...");
         localJar.setOnAction(e -> addLocalJars());
-        MenuItem packModrinth = new MenuItem("Buscar modpacks (Modrinth o CurseForge)...");
+        MenuItem packModrinth = new MenuItem("Buscar modpacks en Modrinth...");
         packModrinth.setOnAction(e -> new ModSearchDialog(window(), host, "modpack", mc, this::modpackFromRepository).show());
-        MenuItem packFile = new MenuItem("Instalar modpack desde archivo (.mrpack o .zip de CurseForge)...");
+        MenuItem packFile = new MenuItem("Instalar modpack desde archivo .mrpack...");
         packFile.setOnAction(e -> modpackFromFile());
         addMenu.getItems().addAll(searchMod, localJar, new SeparatorMenuItem(), packModrinth, packFile);
         addMenu.getStyleClass().add(Styles.ACCENT);
@@ -157,7 +157,7 @@ final class ModsPane extends VBox {
         table.getColumns().add(column("Versión", 140, InstalledMod::version));
         table.getColumns().add(column("Origen", 140, m -> m.source() == null ? "Añadido a mano" : m.source().label()));
         table.getColumns().add(column("Archivo", 200, InstalledMod::fileName));
-        table.setPlaceholder(new Label("Sin mods. Pulsa «+ Añadir» para buscarlos en Modrinth o CurseForge, o instalar un modpack."));
+        table.setPlaceholder(new Label("Sin mods. Pulsa «+ Añadir» para buscarlos en Modrinth o instalar un modpack."));
         table.setFixedCellSize(40);
         table.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
         table.getSelectionModel().selectedItemProperty().addListener((o, a, b) -> updateControls());
@@ -331,7 +331,7 @@ final class ModsPane extends VBox {
         startTask("Buscando versión de " + project.title() + " para Minecraft " + instance.config().mcVersion() + "...");
         UiTasks.run(() -> {
             try {
-                ModRepository repo = ModRepository.byId(project.repo());
+                ModRepository repo = Modrinth.INSTANCE;
                 ModRepository.Version v = ModRepository.best(
                         repo.versions(project.id(), ModManager.LOADER, instance.config().mcVersion()));
                 if (v == null) {
@@ -341,7 +341,7 @@ final class ModsPane extends VBox {
                     return;
                 }
                 Path file = Mrpack.download(v, progressListener());
-                Mrpack.Pack pack = Mrpack.readAny(file);
+                Mrpack.Pack pack = Mrpack.read(file);
                 finish(() -> confirmModpack(pack, file));
             } catch (Exception ex) {
                 finish(() -> UiTasks.error(window(), "Error con el modpack", ex.getMessage()));
@@ -353,13 +353,13 @@ final class ModsPane extends VBox {
         FileChooser fc = new FileChooser();
         fc.setTitle("Elige un modpack");
         fc.getExtensionFilters().add(new FileChooser.ExtensionFilter(
-                "Modpack de Modrinth o CurseForge (*.mrpack, *.zip)", "*.mrpack", "*.zip"));
+                "Modpack de Modrinth (*.mrpack)", "*.mrpack"));
         File f = fc.showOpenDialog(window());
         if (f == null) return;
         startTask("Leyendo el modpack...");
         UiTasks.run(() -> {
             try {
-                Mrpack.Pack pack = Mrpack.readAny(f.toPath());
+                Mrpack.Pack pack = Mrpack.read(f.toPath());
                 finish(() -> confirmModpack(pack, f.toPath()));
             } catch (Exception ex) {
                 finish(() -> UiTasks.error(window(), "No se pudo leer el modpack", ex.getMessage()));
@@ -377,12 +377,6 @@ final class ModsPane extends VBox {
         lines.add("Minecraft " + pack.mcVersion() + " · Fabric Loader " + pack.loaderVersion());
         lines.add(pack.serverFiles().size() + " archivos para el servidor ("
                 + (pack.files().size() - pack.serverFiles().size()) + " son solo para los jugadores y se omiten).");
-        if (!pack.unavailable().isEmpty()) {
-            lines.add("");
-            lines.add("Sus autores no dejan descargar estos automáticamente (tendrás que bajarlos de CurseForge "
-                    + "y añadirlos con «Añadir .jar»):");
-            pack.unavailable().forEach(u -> lines.add("  • " + u));
-        }
         if (!table.getItems().isEmpty()) {
             lines.add("");
             lines.add("Tus " + table.getItems().size() + " mods actuales se moverán a una carpeta «mods-antes-de-...» "

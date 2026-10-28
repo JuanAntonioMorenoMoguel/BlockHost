@@ -32,21 +32,11 @@ Consola en vivo, jugadores conectados, controles e información de conexión (im
 ## Mods y modpacks (servidores Fabric)
 
 - **Pestaña «Mods»** en el panel de cada servidor Fabric: lista de mods con versión y origen, activar/desactivar (sin borrarlos) y quitar.
-- **Buscar en Modrinth o CurseForge** (mods y modpacks, con sus iconos): solo muestra mods que funcionan en servidor y que tienen versión para tu Minecraft y Fabric. Elige la versión compatible más reciente e **instala solas las dependencias obligatorias**.
+- **Buscar en Modrinth** (mods y modpacks, con sus iconos): solo muestra mods que funcionan en servidor y que tienen versión para tu Minecraft y Fabric. Elige la versión compatible más reciente e **instala solas las dependencias obligatorias**.
 - **Tus propios .jar**: añade cualquier mod desde tu PC.
 - **Compatibilidad antes de instalar**: todo se descarga primero a una carpeta temporal y se comprueba como lo haría Fabric al arrancar (`depends`, `breaks`, `conflicts` de `fabric.mod.json`, incluidos los mods incrustados). Comprueba versión de Minecraft, de Fabric Loader y de Java, mods que faltan, duplicados, incompatibles, mods de Forge/NeoForge/Quilt, plugins de Paper y mods solo de cliente. Si algo se rompe, avisa y por defecto no instala.
-- **Modpacks** de Modrinth (`.mrpack`) o CurseForge (`.zip`), desde la búsqueda o desde un archivo: en un servidor existente si coincide la versión de Minecraft, o con **«+ Desde modpack»** se crea un servidor nuevo con la versión de Minecraft y de Fabric Loader exactas que pide el pack. Solo se descargan los archivos de servidor, se verifican sus huellas (SHA-1/SHA-512) y solo desde los dominios que permite el formato.
+- **Modpacks** de Modrinth (`.mrpack`), desde la búsqueda o desde un archivo: en un servidor existente si coincide la versión de Minecraft, o con **«+ Desde modpack»** se crea un servidor nuevo con la versión de Minecraft y de Fabric Loader exactas que pide el pack. Solo se descargan los archivos de servidor, se verifican sus huellas (SHA-1/SHA-512) y solo desde los dominios que permite el formato.
 - Si falta una dependencia en mods añadidos a mano, un botón la busca e instala desde Modrinth.
-
-### CurseForge y su clave de API
-
-CurseForge solo deja usar su API a apps con clave. Es gratuita: se pide en [console.curseforge.com](https://console.curseforge.com/) (API keys). Tres formas de darla:
-
-- Pegarla en la app la primera vez que eliges CurseForge en el buscador (se guarda en `settings.json`).
-- Variable de entorno `BLOCKHOST_CURSEFORGE_API_KEY`.
-- Incrustarla al compilar: `gradlew.bat app -PcurseforgeApiKey=TU_CLAVE` (cualquiera con el `.exe` podría extraerla; no la publiques).
-
-Algunos autores de CurseForge no permiten descargas desde otras apps: BlockHost lo avisa y esos mods hay que bajarlos de la web y añadirlos con «Añadir .jar».
 
 ## Requisitos para desarrollar
 
@@ -58,7 +48,7 @@ Algunos autores de CurseForge no permiten descargas desde otras apps: BlockHost 
 gradlew.bat app
 ```
 
-Genera `build\jpackage\BlockHost\BlockHost.exe`: se abre con doble clic como cualquier programa, **sin ventana de consola detrás** y sin necesitar Java instalado (lleva el suyo). Puedes copiar la carpeta `BlockHost` donde quieras y anclar el `.exe` a la barra de tareas. `gradlew run` (y un `.bat` que lo llame) siempre abre una consola, porque arranca Gradle; úsalo solo para desarrollar.
+Genera `build\jpackage\BlockHost\BlockHost.exe`: se abre con doble clic como cualquier programa, **sin ventana de consola detrás** y sin necesitar Java instalado (lleva el suyo). Puedes copiar la carpeta `BlockHost` donde quieras. **La primera vez que la abres crea un acceso directo en el escritorio** (y si lo borras, puedes volver a crearlo desde el enlace de la barra lateral). En Linux crea también la entrada en el menú de aplicaciones. `gradlew run` (y un `.bat` que lo llame) siempre abre una consola, porque arranca Gradle; úsalo solo para desarrollar.
 
 ## Comandos
 
@@ -89,7 +79,7 @@ src/main/java/com/blockhost/
 ├── Launcher.java                 Punto de entrada
 ├── core/                         Lógica sin dependencias de UI
 │   ├── providers/                Vanilla (piston-meta), Paper (Fill v3), Fabric (meta.fabricmc.net)
-│   ├── mods/                     Modrinth, CurseForge, modpacks, lectura de fabric.mod.json y compatibilidad
+│   ├── mods/                     Modrinth, modpacks .mrpack, lectura de fabric.mod.json y compatibilidad
 │   ├── JavaRuntimeManager.java   Descarga/caché de Temurin vía API de Adoptium
 │   ├── ServerInstaller.java      Orquesta la instalación del asistente
 │   ├── ServerProcess.java        Proceso del servidor, consola, estado y jugadores
@@ -100,7 +90,7 @@ src/main/java/com/blockhost/
     ├── WizardDialog.java         Asistente
     ├── ServerPane.java           Panel de cada servidor
     ├── ModsPane.java             Pestaña de mods
-    ├── ModSearchDialog.java      Buscador de mods y modpacks (Modrinth y CurseForge)
+    ├── ModSearchDialog.java      Buscador de mods y modpacks de Modrinth
     └── ModpackServerDialog.java  Crear servidor desde modpack
 ```
 
