@@ -7,6 +7,7 @@ import com.blockhost.core.ServerConfig;
 import com.blockhost.core.ServerInstance;
 import com.blockhost.core.ServerProcess;
 import com.blockhost.core.ServerProcess.Status;
+import com.blockhost.core.ServerProperties;
 import com.blockhost.core.ServerRegistry;
 import com.blockhost.core.ServerType;
 import com.blockhost.core.SystemInfo;
@@ -18,11 +19,12 @@ import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
-import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.Tooltip;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
@@ -35,6 +37,7 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
 import java.io.IOException;
@@ -79,6 +82,7 @@ public final class ServerPane extends BorderPane {
     private final PlayersPane playersPane;
     private final BackupsPane backupsPane;
     private final StatsPane statsPane;
+    private final CommandAssist assist;
 
     // La consola recibe líneas desde un hilo de fondo: se agrupan para no saturar el hilo de JavaFX.
     private final ConcurrentLinkedQueue<String> pending = new ConcurrentLinkedQueue<>();
@@ -99,6 +103,7 @@ public final class ServerPane extends BorderPane {
         this.playersPane = new PlayersPane(instance, process);
         this.backupsPane = new BackupsPane(instance, process, host, this::appendLine);
         this.statsPane = new StatsPane(instance, process, s -> statsLabel.setText(s));
+        this.assist = new CommandAssist(instance, process, input);
 
         setTop(buildHeader());
         setCenter(buildCenter());
@@ -155,7 +160,7 @@ public final class ServerPane extends BorderPane {
         stopBtn.setOnAction(e -> process.stop());
         backupBtn.setOnAction(e -> backupsPane.backupNow(Backups.MANUAL));
         folderBtn.setOnAction(e -> host.showDocument(instance.dir().toUri().toString()));
-        editItem.setOnAction(e -> new EditServerDialog(getScene().getWindow(), instance, onEdited).show());
+        editItem.setOnAction(e -> openSettings());
         deleteItem.setOnAction(e -> deleteServer());
         settingsMenu.getItems().setAll(editItem, new SeparatorMenuItem(), deleteItem);
         settingsMenu.setTooltip(new Tooltip("Ajustes y borrar"));
@@ -166,6 +171,14 @@ public final class ServerPane extends BorderPane {
         VBox header = new VBox(8, titleRow, meta, buttons, connectionInfo(c));
         header.setPadding(new Insets(0, 0, 12, 0));
         return header;
+    }
+
+    private void openSettings() {
+        try {
+            new EditServerDialog(getScene().getWindow(), instance, ServerProperties.load(instance.dir()), onEdited).show();
+        } catch (java.io.IOException ex) {
+            appendLine("[BlockHost] No se pudo leer server.properties: " + ex.getMessage());
+        }
     }
 
     private javafx.scene.Node buildCenter() {
@@ -204,13 +217,16 @@ public final class ServerPane extends BorderPane {
         console.setStyle("-fx-font-family: 'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace; -fx-font-size: 12px;");
         VBox.setVgrow(console, Priority.ALWAYS);
 
-        input.setPromptText("Comando (p. ej. op TuNombre, whitelist add Amigo, say hola)");
+        input.setPromptText("Comando (p. ej. op TuNombre, say hola). Tab autocompleta, ↑ repite el anterior");
         input.setOnKeyPressed(e -> { if (e.getCode() == KeyCode.ENTER) sendCommand(); });
         sendBtn.setOnAction(e -> sendCommand());
         HBox.setHgrow(input, Priority.ALWAYS);
         HBox inputRow = new HBox(8, input, sendBtn);
 
-        return new VBox(8, console, inputRow);
+        // las sugerencias salen encima de la consola, pegadas al campo, como en el chat del juego
+        StackPane consoleStack = new StackPane(console, assist.suggestions());
+        VBox.setVgrow(consoleStack, Priority.ALWAYS);
+        return new VBox(8, consoleStack, inputRow, assist.hint());
     }
 
     private VBox buildPlayers() {
@@ -276,18 +292,37 @@ public final class ServerPane extends BorderPane {
     private void deleteServer() {
         if (process.isAlive()) return;
         String name = instance.config().name();
-        TextInputDialog d = new TextInputDialog();
+        var type = instance.config().type();
+        String extra = type.supportsPlugins() ? ", los plugins" : type.supportsMods() ? ", los mods" : "";
+        Label what = new Label("Se borrará su carpeta entera: el mundo" + extra
+                + " y las copias de seguridad. No se puede deshacer.");
+        what.setWrapText(true);
+        what.setMinHeight(Region.USE_PREF_SIZE);
+        Label ask = new Label("Para confirmar, escribe el nombre del servidor:");
+        Label expected = new Label(name);
+        expected.getStyleClass().addAll(Styles.TEXT_BOLD, Styles.TITLE_4);
+        TextField typed = new TextField();
+        typed.setPromptText(name);
+        typed.setPrefColumnCount(30);
+        typed.setMaxWidth(Double.MAX_VALUE);
+        Label hint = new Label("No importan mayúsculas ni espacios al principio o al final.");
+        hint.getStyleClass().addAll(Styles.TEXT_MUTED, Styles.TEXT_SMALL);
+        VBox content = new VBox(10, what, ask, expected, typed, hint);
+        content.setPrefWidth(480);
+
+        Dialog<ButtonType> d = new Dialog<>();
         d.initOwner(getScene().getWindow());
         d.setTitle("Borrar servidor");
         d.setHeaderText("¿Borrar «" + name + "» para siempre?");
-        d.setContentText("Se borrará su carpeta entera: el mundo, los " + (instance.config().type().supportsPlugins() ? "plugins" : "mods")
-                + " y las copias de seguridad. No se puede deshacer.\n\nEscribe el nombre del servidor para confirmar:");
-        d.getDialogPane().setPrefWidth(520);
-        Button ok = (Button) d.getDialogPane().lookupButton(ButtonType.OK);
-        ok.setText("Borrar");
+        d.getDialogPane().setContent(content);
+        ButtonType delete = new ButtonType("Borrar", ButtonBar.ButtonData.OK_DONE);
+        d.getDialogPane().getButtonTypes().setAll(ButtonType.CANCEL, delete);
+        Button ok = (Button) d.getDialogPane().lookupButton(delete);
         ok.getStyleClass().add(Styles.DANGER);
-        ok.disableProperty().bind(d.getEditor().textProperty().isNotEqualTo(name));
-        if (d.showAndWait().isEmpty()) return;
+        ok.disableProperty().bind(javafx.beans.binding.Bindings.createBooleanBinding(
+                () -> !typed.getText().trim().equalsIgnoreCase(name.trim()), typed.textProperty()));
+        Platform.runLater(typed::requestFocus);
+        if (d.showAndWait().orElse(ButtonType.CANCEL) != delete) return;
         setDisable(true);
         runInBackground(() -> {
             try {
@@ -309,6 +344,7 @@ public final class ServerPane extends BorderPane {
         String cmd = input.getText().trim();
         if (cmd.isEmpty() || !process.isAlive()) return;
         process.send(cmd);
+        assist.sent(cmd);
         input.clear();
     }
 

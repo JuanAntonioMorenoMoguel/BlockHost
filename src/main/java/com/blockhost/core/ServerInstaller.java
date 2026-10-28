@@ -7,11 +7,9 @@ import com.blockhost.core.providers.ForgeProvider;
 import com.blockhost.core.providers.MojangMeta;
 
 import java.io.IOException;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Properties;
 
 /** Orquesta la instalación completa que el asistente lanza al final. */
 public final class ServerInstaller {
@@ -101,25 +99,22 @@ public final class ServerInstaller {
         return inst;
     }
 
-    /** Escribe/actualiza server.properties conservando las claves que ya hubiera. */
+    /**
+     * Escribe/actualiza server.properties conservando las claves que ya hubiera. En un servidor nuevo la lista
+     * blanca empieza desactivada (cualquiera con el puerto puede entrar); se activa desde la pestaña Jugadores.
+     */
     public static void writeProperties(Path dir, ServerConfig cfg) throws IOException {
-        Path file = dir.resolve("server.properties");
-        Properties props = new Properties();
-        if (Files.exists(file)) {
-            try (var r = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                props.load(r);
-            }
-        }
-        props.setProperty("server-port", String.valueOf(cfg.port()));
-        props.setProperty("motd", cfg.motd());
-        props.setProperty("max-players", String.valueOf(cfg.maxPlayers()));
-        props.setProperty("difficulty", cfg.difficulty());
-        props.setProperty("gamemode", cfg.gamemode());
-        props.setProperty("online-mode", String.valueOf(cfg.onlineMode()));
-        props.setProperty("pvp", String.valueOf(cfg.pvp()));
-        props.setProperty("enable-rcon", "false");
-        try (Writer w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-            props.store(w, "Generado por BlockHost");
-        }
+        ServerProperties p = ServerProperties.load(dir);
+        p.set("server-port", String.valueOf(cfg.port()));
+        p.set("motd", cfg.motd());
+        p.set("max-players", String.valueOf(cfg.maxPlayers()));
+        p.set("difficulty", cfg.difficulty());
+        p.set("gamemode", cfg.gamemode());
+        p.set("online-mode", String.valueOf(cfg.onlineMode()));
+        p.set("pvp", String.valueOf(cfg.pvp()));
+        p.setIfAbsent("white-list", "false");
+        p.setIfAbsent("enforce-whitelist", "false");
+        p.setIfAbsent("enable-rcon", "false");
+        p.save();
     }
 }
