@@ -79,6 +79,7 @@ final class EditServerDialog extends Stage {
     private final CheckBox onlineModeBox = new CheckBox("Solo cuentas oficiales de Minecraft (recomendado)");
     private final CheckBox pvpBox = new CheckBox("Permitir PvP entre jugadores");
     private final CheckBox whitelistBox = new CheckBox("Lista blanca: solo pueden entrar los jugadores de la lista");
+    private final CheckBox routerPortBox = new CheckBox("Abrir el puerto en el router al iniciar (UPnP / NAT-PMP)");
     private final Label errorLabel = new Label();
 
     /** Fila de «Avanzado»: clave y valor (editable). */
@@ -159,6 +160,9 @@ final class EditServerDialog extends Stage {
         onlineModeBox.setSelected(c.onlineMode());
         pvpBox.setSelected(c.pvp());
         whitelistBox.setSelected(props.getBool("white-list", false));
+        routerPortBox.setSelected(instance.openRouterPort());
+        routerPortBox.setTooltip(new javafx.scene.control.Tooltip("Para que tus amigos entren desde fuera de tu casa. "
+                + "Se cierra al detener el servidor."));
         set(portSpinner, c.port());
         set(maxPlayersSpinner, c.maxPlayers());
         set(viewDistance, props.getInt("view-distance", 10));
@@ -188,7 +192,7 @@ final class EditServerDialog extends Stage {
         Label note = new Label("La carpeta del servidor no cambia aunque le cambies el nombre.");
         note.getStyleClass().addAll(Styles.TEXT_MUTED, Styles.TEXT_SMALL);
 
-        VBox box = new VBox(12, g, perf, pvpBox, onlineModeBox, whitelistBox, note);
+        VBox box = new VBox(12, g, perf, pvpBox, onlineModeBox, whitelistBox, routerPortBox, note);
         box.setPadding(new Insets(12, 12, 12, 0));
         ScrollPane sp = new ScrollPane(box);
         sp.setFitToWidth(true);
@@ -328,6 +332,7 @@ final class EditServerDialog extends Stage {
             p.set("enforce-whitelist", String.valueOf(whitelistBox.isSelected()));
             p.save();
             instance.setConfig(cfg);
+            instance.setOpenRouterPort(routerPortBox.isSelected());
             instance.save();
         } catch (Exception ex) {
             errorLabel.setText("No se pudo guardar: " + ex.getMessage());

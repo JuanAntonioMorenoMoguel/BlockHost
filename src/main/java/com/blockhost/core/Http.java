@@ -51,6 +51,14 @@ public final class Http {
         return Json.parse(r.body());
     }
 
+    /** Texto corto con un tiempo máximo (para consultas rápidas, como la IP pública). */
+    public static String getText(String url, Duration timeout) throws IOException, InterruptedException {
+        HttpRequest r = HttpRequest.newBuilder(URI.create(url)).header("User-Agent", USER_AGENT).timeout(timeout).GET().build();
+        HttpResponse<String> resp = CLIENT.send(r, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        check(resp, url);
+        return resp.body();
+    }
+
     public static Object postJson(String url, Object body, String... headers) throws IOException, InterruptedException {
         HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
                 .header("User-Agent", USER_AGENT)

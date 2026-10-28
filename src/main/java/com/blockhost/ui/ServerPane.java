@@ -83,6 +83,7 @@ public final class ServerPane extends BorderPane {
     private final BackupsPane backupsPane;
     private final StatsPane statsPane;
     private final CommandAssist assist;
+    private final ConnectionPane connectionPane;
 
     // La consola recibe líneas desde un hilo de fondo: se agrupan para no saturar el hilo de JavaFX.
     private final ConcurrentLinkedQueue<String> pending = new ConcurrentLinkedQueue<>();
@@ -104,6 +105,7 @@ public final class ServerPane extends BorderPane {
         this.backupsPane = new BackupsPane(instance, process, host, this::appendLine);
         this.statsPane = new StatsPane(instance, process, s -> statsLabel.setText(s));
         this.assist = new CommandAssist(instance, process, input);
+        this.connectionPane = new ConnectionPane(instance);
 
         setTop(buildHeader());
         setCenter(buildCenter());
@@ -132,6 +134,7 @@ public final class ServerPane extends BorderPane {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+        connectionPane.closeNow(); // la app se cierra: no esperar al aviso de parada para cerrar el puerto
     }
 
     // ---------------- construcción ----------------
@@ -168,7 +171,7 @@ public final class ServerPane extends BorderPane {
         HBox.setHgrow(btnSpacer, Priority.ALWAYS);
         HBox buttons = new HBox(8, startBtn, stopBtn, backupBtn, folderBtn, btnSpacer, settingsMenu);
 
-        VBox header = new VBox(8, titleRow, meta, buttons, connectionInfo(c));
+        VBox header = new VBox(8, titleRow, meta, buttons, connectionPane);
         header.setPadding(new Insets(0, 0, 12, 0));
         return header;
     }
@@ -194,21 +197,6 @@ public final class ServerPane extends BorderPane {
                 new Tab("Rendimiento", statsPane));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         return tabs;
-    }
-
-    private Label connectionInfo(ServerConfig c) {
-        List<String> ips = SystemInfo.localIPv4();
-        String lan = ips.isEmpty() ? "—" : String.join(", ", ips.stream().map(ip -> ip + ":" + c.port()).toList());
-        String extra = c.type().supportsMods()
-                ? "\nMods: gestiónalos en la pestaña «Mods» (los jugadores necesitan los mismos)."
-                : c.type().supportsPlugins() ? "\nPlugins: búscalos e instálalos en la pestaña «Plugins»." : "";
-        Label l = new Label("Desde este PC: localhost:" + c.port()
-                + "    ·    Desde tu red (Wi-Fi/cable): " + lan
-                + "\nAmigos fuera de tu casa: abre el puerto " + c.port()
-                + " (TCP) en el router o usa un túnel como playit.gg." + extra);
-        l.getStyleClass().addAll(Styles.TEXT_MUTED, Styles.TEXT_SMALL);
-        l.setWrapText(true);
-        return l;
     }
 
     private VBox buildConsole() {
@@ -362,8 +350,16 @@ public final class ServerPane extends BorderPane {
     private void updateStatus(Status s) {
         statusLabel.getStyleClass().removeAll(Styles.SUCCESS, Styles.WARNING, Styles.TEXT_MUTED);
         switch (s) {
-            case STOPPED -> { statusLabel.setText("● Detenido"); statusLabel.getStyleClass().add(Styles.TEXT_MUTED); }
-            case STARTING -> { statusLabel.setText("● Iniciando..."); statusLabel.getStyleClass().add(Styles.WARNING); }
+            case STOPPED -> {
+                statusLabel.setText("● Detenido");
+                statusLabel.getStyleClass().add(Styles.TEXT_MUTED);
+                connectionPane.serverStopped();
+            }
+            case STARTING -> {
+                statusLabel.setText("● Iniciando...");
+                statusLabel.getStyleClass().add(Styles.WARNING);
+                connectionPane.serverStarting();
+            }
             case RUNNING -> { statusLabel.setText("● En marcha"); statusLabel.getStyleClass().add(Styles.SUCCESS); }
             case STOPPING -> { statusLabel.setText("● Deteniendo..."); statusLabel.getStyleClass().add(Styles.WARNING); }
         }
