@@ -8,6 +8,7 @@ import com.blockhost.core.net.ConnectionGuide;
 import com.blockhost.core.net.NatPmp;
 import com.blockhost.core.net.PortForwarder;
 import com.blockhost.core.net.PortForwarder.State;
+import com.blockhost.core.net.ReachabilityCheck;
 import com.blockhost.core.net.WindowsFirewall;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
@@ -38,6 +39,7 @@ final class ConnectionPane extends VBox {
     private final Button guideBtn = new Button("Cómo invitar a amigos de fuera...");
     private volatile PortForwarder forwarder;
     private volatile boolean running;
+    private volatile boolean ready; // el servidor ya acepta jugadores: se puede comprobar desde internet
     private String publicIp;
 
     ConnectionPane(ServerInstance instance) {
@@ -58,7 +60,10 @@ final class ConnectionPane extends VBox {
         }
         guideBtn.getStyleClass().add(Styles.FLAT);
         copyBtn.setOnAction(e -> copy(share.getText()));
-        retryBtn.setOnAction(e -> openPort());
+        retryBtn.setOnAction(e -> {
+            if (instance.openRouterPort()) openPort();
+            else verify();
+        });
         firewallBtn.setOnAction(e -> addFirewallRule());
         guideBtn.setOnAction(e -> showGuide());
 
@@ -97,13 +102,21 @@ final class ConnectionPane extends VBox {
 
     void serverStarting() {
         running = true;
+        ready = false;
         if (instance.openRouterPort()) openPort();
         else showIdle();
+    }
+
+    /** Ya acepta jugadores: se comprueba desde internet si llegan (también si el puerto se abrió a mano). */
+    void serverRunning() {
+        ready = true;
+        verify();
     }
 
     /** Al parar: cierra el puerto en segundo plano. */
     void serverStopped() {
         running = false;
+        ready = false;
         PortForwarder f = forwarder;
         forwarder = null;
         if (f != null) UiTasks.run(f::close);
@@ -135,7 +148,64 @@ final class ConnectionPane extends VBox {
             if (old != null) old.close();
             f.open();
             if (!running || forwarder != f) f.close(); // se paró mientras buscaba el router
+            else if (ready) verifyNow(); // reintento con el servidor ya en marcha
         });
+    }
+
+    private void verify() { UiTasks.run(this::verifyNow); }
+
+    /**
+     * Pregunta a un servicio de internet si llega al servidor. Sirve cuando el router no tiene UPnP pero el puerto
+     * ya está abierto a mano, y para confirmar que lo abierto por UPnP funciona de verdad. En segundo plano.
+     */
+    private void verifyNow() {
+        PortForwarder f = forwarder;
+        if (f != null) f.awaitIdle();
+        PortForwarder.Status s = f == null ? null : f.last();
+        if (s != null && (s.state() == State.CGNAT || s.state() == State.DOUBLE_NAT)) return; // ya se sabe que no llega
+        int port = instance.config().port();
+        String pub = publicIp != null ? publicIp : PortForwarder.publicIp();
+        publicIp = pub;
+        if (pub == null || !ready) return;
+        if (s == null || s.state() != State.OPEN) {
+            Platform.runLater(() -> {
+                setInternet("Amigos fuera de tu casa: comprobando desde internet si el puerto " + port
+                        + " ya está abierto...", null);
+                setButtons(false, false);
+            });
+        }
+        ReachabilityCheck.Outcome o = ReachabilityCheck.check(pub, port);
+        Platform.runLater(() -> { if (ready && forwarder == f) showCheck(o, s, pub, port); });
+    }
+
+    private void showCheck(ReachabilityCheck.Outcome o, PortForwarder.Status s, String pub, int port) {
+        boolean opened = s != null && s.state() == State.OPEN;
+        switch (o.result()) {
+            case REACHABLE -> {
+                setInternet("✔ " + (opened ? s.detail() + " " : "El puerto " + port + " ya está abierto en tu router. ")
+                        + "Comprobado desde internet: tus amigos pueden entrar con:", Styles.SUCCESS);
+                share.setText(port == 25565 ? pub : pub + ":" + port);
+                setButtons(true, false);
+            }
+            case UNREACHABLE -> {
+                if (opened) {
+                    setInternet("⚠ El router dice que el puerto está abierto, pero desde internet no se llega "
+                            + "(comprobado con " + o.service() + "). Suele ser el Firewall de Windows o otro router "
+                            + "delante. Mira la guía.", Styles.WARNING);
+                } else {
+                    setInternet("✖ " + (s != null && s.detail() != null ? "No se pudo abrir el puerto: " + s.detail() + " " : "")
+                            + "Desde internet tampoco se llega al puerto " + port + " (comprobado con " + o.service()
+                            + "), así que no está abierto a mano. Ábrelo en el router o usa un túnel: mira la guía. "
+                            + "Si acabas de abrirlo, espera un minuto y pulsa «Comprobar otra vez».", Styles.DANGER);
+                }
+                retryBtn.setText("Comprobar otra vez");
+                setButtons(false, true);
+            }
+            case UNKNOWN -> {
+                if (s != null) show(s); // sin respuesta de los servicios: se queda lo que dijo el router
+                else showIdle();
+            }
+        }
     }
 
     // ---------------- estado ----------------
