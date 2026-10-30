@@ -79,6 +79,9 @@ public final class PortForwarder {
 
     public Status last() { return last; }
 
+    /** Espera a que termine un open() o close() en marcha (comparten el cerrojo). */
+    public synchronized void awaitIdle() { }
+
     /** Abre el puerto. Tarda unos segundos (busca el router): llamar desde un hilo de fondo. */
     public synchronized Status open() {
         List<String> locals = SystemInfo.localIPv4();

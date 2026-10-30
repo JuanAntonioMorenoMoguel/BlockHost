@@ -234,7 +234,10 @@ public final class ServerPane extends BorderPane {
             try {
                 int port = instance.config().port();
                 if (!portFree(port)) {
-                    appendLine("[BlockHost] El puerto " + port + " está ocupado. ¿Hay otro servidor en marcha?");
+                    int free = nextFreePort(port);
+                    appendLine("[BlockHost] El puerto " + port + " está ocupado. ¿Hay otro servidor o programa usándolo?"
+                            + (free > 0 ? " Ciérralo o cambia el puerto en ⚙ → Editar ajustes (el " + free
+                            + " está libre; si abriste el puerto a mano en el router, cámbialo también allí)." : ""));
                     Platform.runLater(() -> updateStatus(process.status()));
                     return;
                 }
@@ -336,6 +339,12 @@ public final class ServerPane extends BorderPane {
         input.clear();
     }
 
+    /** Primer puerto libre después de port, o -1. */
+    private static int nextFreePort(int port) {
+        for (int p = port + 1; p <= Math.min(65535, port + 50); p++) if (portFree(p)) return p;
+        return -1;
+    }
+
     private static boolean portFree(int port) {
         try (ServerSocket s = new ServerSocket(port)) {
             s.setReuseAddress(true);
@@ -360,7 +369,11 @@ public final class ServerPane extends BorderPane {
                 statusLabel.getStyleClass().add(Styles.WARNING);
                 connectionPane.serverStarting();
             }
-            case RUNNING -> { statusLabel.setText("● En marcha"); statusLabel.getStyleClass().add(Styles.SUCCESS); }
+            case RUNNING -> {
+                statusLabel.setText("● En marcha");
+                statusLabel.getStyleClass().add(Styles.SUCCESS);
+                connectionPane.serverRunning();
+            }
             case STOPPING -> { statusLabel.setText("● Deteniendo..."); statusLabel.getStyleClass().add(Styles.WARNING); }
         }
         boolean alive = s != Status.STOPPED;
