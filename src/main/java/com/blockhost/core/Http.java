@@ -1,8 +1,12 @@
 package com.blockhost.core;
 
+import java.io.ByteArrayInputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.SequenceInputStream;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -12,6 +16,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /** Peticiones HTTP: JSON y descargas con progreso. */
 public final class Http {
@@ -111,5 +119,65 @@ public final class Http {
         }
         Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
         p.onProgress(label + " completado", 1);
+    }
+
+    /**
+     * Sube un fichero en un formulario multipart (campos de texto + el fichero) y devuelve el cuerpo de la respuesta.
+     * El fichero se envía en streaming, sin cargarlo en memoria, con el avance en p.
+     */
+    public static String uploadFile(String url, Map<String, String> fields, String fileField, Path file, String label,
+                                    ProgressListener p) throws IOException, InterruptedException {
+        String boundary = "----BlockHost" + UUID.randomUUID().toString().replace("-", "");
+        StringBuilder head = new StringBuilder();
+        for (Map.Entry<String, String> f : fields.entrySet()) {
+            head.append("--").append(boundary).append("\r\n")
+                    .append("Content-Disposition: form-data; name=\"").append(f.getKey()).append("\"\r\n\r\n")
+                    .append(f.getValue()).append("\r\n");
+        }
+        String name = file.getFileName().toString().replace("\"", "");
+        head.append("--").append(boundary).append("\r\n")
+                .append("Content-Disposition: form-data; name=\"").append(fileField).append("\"; filename=\"")
+                .append(name).append("\"\r\n")
+                .append("Content-Type: application/zip\r\n\r\n");
+        byte[] before = head.toString().getBytes(StandardCharsets.UTF_8);
+        byte[] after = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+        long size = Files.size(file);
+        long total = before.length + size + after.length;
+
+        HttpRequest.BodyPublisher body = HttpRequest.BodyPublishers.fromPublisher(
+                HttpRequest.BodyPublishers.ofInputStream(() -> {
+                    try {
+                        InputStream counted = new FilterInputStream(Files.newInputStream(file)) {
+                            private long done, lastReport;
+
+                            @Override
+                            public int read(byte[] b, int off, int len) throws IOException {
+                                int n = super.read(b, off, len);
+                                if (n > 0) {
+                                    done += n;
+                                    if (done - lastReport > 512 * 1024 || done == size) {
+                                        lastReport = done;
+                                        p.onProgress(String.format("%s (%.1f de %.1f MB)", label, done / 1048576.0,
+                                                size / 1048576.0), size > 0 ? (double) done / size : -1);
+                                    }
+                                }
+                                return n;
+                            }
+                        };
+                        return new SequenceInputStream(Collections.enumeration(List.of(
+                                new ByteArrayInputStream(before), counted, new ByteArrayInputStream(after))));
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                }), total);
+        HttpRequest r = HttpRequest.newBuilder(URI.create(url))
+                .header("User-Agent", USER_AGENT)
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .timeout(Duration.ofHours(3)) // mundos grandes con poca subida
+                .POST(body)
+                .build();
+        HttpResponse<String> resp = CLIENT.send(r, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        check(resp, url);
+        return resp.body();
     }
 }
