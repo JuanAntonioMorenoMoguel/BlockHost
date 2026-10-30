@@ -59,6 +59,7 @@ Consola en vivo, jugadores conectados, controles e información de conexión (im
 - **Sin lista blanca por defecto**: los servidores nuevos se crean con `white-list=false`; se activa desde Ajustes o desde la pestaña Jugadores.
 - **Jugadores**: conectados (hacer operador, echar, banear), operadores, lista blanca (con interruptor para activarla) y baneados, sin escribir comandos. En marcha se aplican con comandos; detenido, se editan `ops.json`, `whitelist.json` y `banned-players.json` (con el UUID oficial de Mojang o el de modo offline).
 - **Copias de seguridad**: manuales y **automáticas cada X horas** mientras el servidor está en marcha (guarda solo las últimas N), sin cortar el juego (`save-off` → `save-all flush` → copia → `save-on`). **Restaurar** una copia con el servidor detenido; antes se guarda el mundo actual por si acaso. Respeta `level-name`.
+- **Compartir mundos** (pestaña Compartir): **exportar** el mundo a un `.zip` (si tienes Google Drive, OneDrive o Dropbox para escritorio, el diálogo se abre en esa carpeta y solo queda compartir el archivo desde la web) o **subirlo y obtener un enlace** sin cuenta ni claves (litterbox.catbox.moe, hasta 1 GB, caduca en 3 días). Para **recibir** uno: pegar un enlace (de BlockHost, Google Drive con «Cualquier persona con el enlace», Dropbox u OneDrive), elegir un `.zip` o la carpeta de un mundo de un jugador (`.minecraft\saves`). Busca el `level.dat`, coloca el Nether y el End en su sitio según `level-name` y guarda antes el mundo que había en una copia.
 - **Rendimiento**: CPU y RAM del servidor y del PC, con gráficas de los últimos 5 minutos y un resumen en la cabecera.
 - **Abrir el puerto del router solo**: al iniciar el servidor se abre su puerto por UPnP (o NAT-PMP si el router no tiene UPnP) y se cierra al detenerlo. El panel enseña la dirección para pasar a tus amigos (tu IP pública, con botón de copiar) y avisa si hay CG-NAT u otro router delante, si el router no tiene UPnP o si el puerto ya lo usa otro equipo. Se activa o desactiva en ⚙ → Editar ajustes. Con el servidor ya en marcha, se **comprueba desde internet** (mcstatus.io / mcsrvstat.us) si se llega al puerto: si tu router no tiene UPnP pero lo abriste a mano, lo detecta y te da la dirección igual; si UPnP dice que está abierto pero no llega, avisa (suele ser el Firewall). Si el puerto está ocupado en el PC, propone otro libre.
 - **Guía para amigos de fuera** si el router no deja: abrir el puerto a mano (con la IP de tu PC, la del router, el puerto y el protocolo ya puestos), túnel con playit.gg o red privada con Tailscale o ZeroTier, con lo que hace quien aloja y lo que hacen los jugadores.
@@ -132,6 +133,7 @@ src/main/java/com/blockhost/
 │   ├── ServerProperties.java     Leer y guardar server.properties, con la explicación de cada opción
 │   ├── CommandCatalog.java       Comandos de cada versión para autocompletar
 │   ├── Backups.java              Copias del mundo: crear, listar, limpiar y restaurar
+│   ├── WorldShare.java           Exportar, subir, descargar e importar mundos
 │   ├── PlayerLists.java          Operadores, lista blanca y baneados
 │   ├── net/                      Abrir puertos (UPnP, NAT-PMP), Firewall de Windows y guía de conexión
 │   ├── ProcessStats.java         CPU y RAM del servidor y del equipo
@@ -146,6 +148,7 @@ src/main/java/com/blockhost/
     ├── ModsPane.java             Pestaña de mods o plugins (y actualizaciones)
     ├── PlayersPane.java          Pestaña de jugadores
     ├── BackupsPane.java          Pestaña de copias (y copias automáticas)
+    ├── WorldSharePane.java       Pestaña para compartir y recibir mundos
     ├── StatsPane.java            Pestaña de rendimiento
     ├── EditServerDialog.java     Ajustes de un servidor existente (general y avanzado)
     ├── ModSearchDialog.java      Buscador de mods, plugins y modpacks de Modrinth
