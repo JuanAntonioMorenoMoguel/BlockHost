@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.Callable;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -58,8 +59,14 @@ public final class Backups {
         String stamp = LocalDateTime.now().format(STAMP);
         Path zip = backups.resolve(kind + stamp + ".zip");
         for (int i = 2; Files.exists(zip); i++) zip = backups.resolve(kind + stamp + "-" + i + ".zip");
+        zipWorld(dir, zip);
+        return zip;
+    }
+
+    /** Comprime las carpetas del mundo del servidor en dir a target (se escribe aparte y se mueve al terminar). */
+    static void zipWorld(Path dir, Path target) throws IOException {
         boolean any = false;
-        Path tmp = zip.resolveSibling(zip.getFileName() + ".part");
+        Path tmp = target.resolveSibling(target.getFileName() + ".part");
         try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(tmp))) {
             for (String w : worldDirs(dir)) {
                 Path world = dir.resolve(w);
@@ -82,8 +89,7 @@ public final class Backups {
             Files.deleteIfExists(tmp);
             throw new IOException("Todavía no hay mundo: arranca el servidor al menos una vez");
         }
-        Files.move(tmp, zip, StandardCopyOption.REPLACE_EXISTING);
-        return zip;
+        Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
     }
 
     /**
@@ -91,12 +97,17 @@ public final class Backups {
      * se fuerza a escribir todo a disco, se copia y se reanuda.
      */
     public static Path createWhileRunning(ServerInstance inst, ServerProcess process, String kind) throws Exception {
-        if (!process.isAlive()) return create(inst, kind);
+        return whileSavingPaused(process, () -> create(inst, kind));
+    }
+
+    /** Ejecuta task con el guardado del servidor pausado y el mundo escrito a disco (si está en marcha). */
+    public static <T> T whileSavingPaused(ServerProcess process, Callable<T> task) throws Exception {
+        if (process == null || !process.isAlive()) return task.call();
         process.send("save-off");
         process.send("save-all flush");
         Thread.sleep(5000); // margen para que el servidor termine de escribir
         try {
-            return create(inst, kind);
+            return task.call();
         } finally {
             process.send("save-on");
         }
@@ -161,23 +172,8 @@ public final class Backups {
         Path tmp = dir.resolve("backups").resolve(".restaurando");
         JavaRuntimeManager.deleteRecursively(tmp);
         Files.createDirectories(tmp);
-        List<String> roots = new ArrayList<>();
         try {
-            try (ZipInputStream in = new ZipInputStream(Files.newInputStream(zip))) {
-                ZipEntry e;
-                while ((e = in.getNextEntry()) != null) {
-                    Path out = tmp.resolve(e.getName()).normalize();
-                    if (!out.startsWith(tmp) || out.equals(tmp)) throw new IOException("Entrada no permitida: " + e.getName());
-                    String root = tmp.relativize(out).getName(0).toString();
-                    if (!roots.contains(root)) roots.add(root);
-                    if (e.isDirectory()) {
-                        Files.createDirectories(out);
-                    } else {
-                        Files.createDirectories(out.getParent());
-                        Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
-                    }
-                }
-            }
+            List<String> roots = unzip(zip, tmp);
             if (roots.isEmpty()) throw new IOException("La copia está vacía");
             for (String w : worldDirs(dir)) JavaRuntimeManager.deleteRecursively(dir.resolve(w));
             for (String r : roots) {
@@ -188,6 +184,27 @@ public final class Backups {
             JavaRuntimeManager.deleteRecursively(tmp);
         }
         return safety;
+    }
+
+    /** Extrae zip en dir (sin dejar salir nada de dir). Devuelve las carpetas o ficheros de primer nivel. */
+    static List<String> unzip(Path zip, Path dir) throws IOException {
+        List<String> roots = new ArrayList<>();
+        try (ZipInputStream in = new ZipInputStream(Files.newInputStream(zip))) {
+            ZipEntry e;
+            while ((e = in.getNextEntry()) != null) {
+                Path out = dir.resolve(e.getName()).normalize();
+                if (!out.startsWith(dir) || out.equals(dir)) throw new IOException("Entrada no permitida: " + e.getName());
+                String root = dir.relativize(out).getName(0).toString();
+                if (!roots.contains(root)) roots.add(root);
+                if (e.isDirectory()) {
+                    Files.createDirectories(out);
+                } else {
+                    Files.createDirectories(out.getParent());
+                    Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+        return roots;
     }
 
     /** Carpetas del mundo según level-name de server.properties: world, world_nether y world_the_end. */

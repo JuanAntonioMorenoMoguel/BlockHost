@@ -81,6 +81,7 @@ public final class ServerPane extends BorderPane {
     private final ModsPane modsPane;
     private final PlayersPane playersPane;
     private final BackupsPane backupsPane;
+    private final WorldSharePane sharePane;
     private final StatsPane statsPane;
     private final CommandAssist assist;
     private final ConnectionPane connectionPane;
@@ -103,6 +104,7 @@ public final class ServerPane extends BorderPane {
         this.modsPane = instance.config().type().supportsAddons() ? new ModsPane(instance, host) : null;
         this.playersPane = new PlayersPane(instance, process);
         this.backupsPane = new BackupsPane(instance, process, host, this::appendLine);
+        this.sharePane = new WorldSharePane(instance, process, host, this::appendLine, backupsPane::refresh);
         this.statsPane = new StatsPane(instance, process, s -> statsLabel.setText(s));
         this.assist = new CommandAssist(instance, process, input);
         this.connectionPane = new ConnectionPane(instance);
@@ -194,6 +196,7 @@ public final class ServerPane extends BorderPane {
             tabs.getTabs().add(new Tab(instance.config().type().supportsPlugins() ? "Plugins" : "Mods", modsPane));
         }
         tabs.getTabs().addAll(new Tab("Jugadores", playersPane), new Tab("Copias", backupsPane),
+                new Tab("Compartir", sharePane),
                 new Tab("Rendimiento", statsPane));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         return tabs;
@@ -384,6 +387,7 @@ public final class ServerPane extends BorderPane {
         if (modsPane != null) modsPane.setServerRunning(alive);
         playersPane.setServerRunning(alive);
         backupsPane.setServerRunning(alive);
+        sharePane.setServerRunning(alive);
         editItem.setDisable(alive);
         deleteItem.setDisable(alive);
         settingsMenu.setTooltip(new Tooltip(alive ? "Detén el servidor para cambiar ajustes o borrarlo" : "Ajustes y borrar"));
