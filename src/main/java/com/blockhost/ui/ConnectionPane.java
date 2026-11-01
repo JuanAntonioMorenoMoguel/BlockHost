@@ -37,6 +37,7 @@ final class ConnectionPane extends VBox {
     private final Button retryBtn = new Button("Reintentar");
     private final Button firewallBtn = new Button("Permitir en el Firewall");
     private final Button guideBtn = new Button("Cómo invitar a amigos de fuera...");
+    private final Button portsBtn = new Button("Puertos del router...");
     private volatile PortForwarder forwarder;
     private volatile boolean running;
     private volatile boolean ready; // el servidor ya acepta jugadores: se puede comprobar desde internet
@@ -54,11 +55,14 @@ final class ConnectionPane extends VBox {
         internet.setMinHeight(Region.USE_PREF_SIZE);
         internet.getStyleClass().add(Styles.TEXT_SMALL);
         share.getStyleClass().addAll(Styles.TEXT_BOLD);
-        for (Button b : List.of(copyBtn, retryBtn, firewallBtn, guideBtn)) {
+        for (Button b : List.of(copyBtn, retryBtn, firewallBtn, guideBtn, portsBtn)) {
             b.getStyleClass().addAll(Styles.SMALL);
             b.setMinWidth(Region.USE_PREF_SIZE);
         }
         guideBtn.getStyleClass().add(Styles.FLAT);
+        portsBtn.getStyleClass().add(Styles.FLAT);
+        portsBtn.setOnAction(e -> new PortsDialog(window(), instance.config().port(),
+                p -> ready && p == instance.config().port(), this::showGuide).show());
         copyBtn.setOnAction(e -> copy(share.getText()));
         retryBtn.setOnAction(e -> {
             if (instance.openRouterPort()) openPort();
@@ -69,7 +73,7 @@ final class ConnectionPane extends VBox {
 
         HBox shareRow = new HBox(8, share, copyBtn);
         shareRow.setAlignment(Pos.CENTER_LEFT);
-        FlowPane actions = new FlowPane(6, 4, shareRow, retryBtn, firewallBtn, guideBtn);
+        FlowPane actions = new FlowPane(6, 4, shareRow, retryBtn, firewallBtn, guideBtn, portsBtn);
         actions.setAlignment(Pos.CENTER_LEFT);
 
         String extra = instance.config().type().supportsMods()

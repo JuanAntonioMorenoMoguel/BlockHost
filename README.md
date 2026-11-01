@@ -35,8 +35,8 @@ Consola en vivo, jugadores conectados, controles e información de conexión (im
 | Puerto abierto solo (UPnP) | El router no deja |
 |---|---|
 | ![Puerto abierto](docs/screenshots/conexion-abierta.png) | ![Sin UPnP](docs/screenshots/conexion-sin-upnp.png) |
-| **Abierto a mano (comprobado desde internet)** | |
-| ![Abierto a mano](docs/screenshots/conexion-abierto-a-mano.png) | |
+| **Abierto a mano (comprobado desde internet)** | **Puertos del router** |
+| ![Abierto a mano](docs/screenshots/conexion-abierto-a-mano.png) | ![Puertos](docs/screenshots/puertos.png) |
 | **Guía con tus datos** | **Túnel (playit.gg)** |
 | ![Guía](docs/screenshots/guia-conexion.png) | ![playit](docs/screenshots/guia-playit.png) |
 
@@ -62,6 +62,7 @@ Consola en vivo, jugadores conectados, controles e información de conexión (im
 - **Compartir mundos** (pestaña Compartir): **exportar** el mundo a un `.zip` (si tienes Google Drive, OneDrive o Dropbox para escritorio, el diálogo se abre en esa carpeta y solo queda compartir el archivo desde la web) o **subirlo y obtener un enlace** sin cuenta ni claves (litterbox.catbox.moe, hasta 1 GB, caduca en 3 días). Para **recibir** uno: pegar un enlace (de BlockHost, Google Drive con «Cualquier persona con el enlace», Dropbox u OneDrive), elegir un `.zip` o la carpeta de un mundo de un jugador (`.minecraft\saves`). Busca el `level.dat`, coloca el Nether y el End en su sitio según `level-name` y guarda antes el mundo que había en una copia.
 - **Rendimiento**: CPU y RAM del servidor y del PC, con gráficas de los últimos 5 minutos y un resumen en la cabecera.
 - **Abrir el puerto del router solo**: al iniciar el servidor se abre su puerto por UPnP (o NAT-PMP si el router no tiene UPnP) y se cierra al detenerlo. El panel enseña la dirección para pasar a tus amigos (tu IP pública, con botón de copiar) y avisa si hay CG-NAT u otro router delante, si el router no tiene UPnP o si el puerto ya lo usa otro equipo. Se activa o desactiva en ⚙ → Editar ajustes. Con el servidor ya en marcha, se **comprueba desde internet** (mcstatus.io / mcsrvstat.us) si se llega al puerto: si tu router no tiene UPnP pero lo abriste a mano, lo detecta y te da la dirección igual; si UPnP dice que está abierto pero no llega, avisa (suele ser el Firewall). Si el puerto está ocupado en el PC, propone otro libre.
+- **Puertos del router** (botón en el panel del servidor): lista lo que tiene abierto el router por UPnP (marcando lo de BlockHost y lo que apunta a este PC), abrir y cerrar puertos a mano (TCP, UDP o ambos, con atajos para Simple Voice Chat, Geyser, Plasmo Voice, BlueMap/Dynmap o RCON), cerrar todos los de BlockHost y comprobar desde internet si llega cada puerto TCP (aunque no haya nada escuchando: BlockHost contesta como un servidor de Minecraft mientras dura la prueba). Con NAT-PMP solo se ven los abiertos desde BlockHost; sin UPnP ni NAT-PMP lo dice y lleva a la guía.
 - **Guía para amigos de fuera** si el router no deja: abrir el puerto a mano (con la IP de tu PC, la del router, el puerto y el protocolo ya puestos), túnel con playit.gg o red privada con Tailscale o ZeroTier, con lo que hace quien aloja y lo que hacen los jugadores.
 - **Firewall de Windows**: botón para crear la regla de entrada del puerto (pide permiso de administrador).
 - IPs de conexión (local y red) y comprobación de puerto ocupado antes de arrancar.
@@ -145,6 +146,7 @@ src/main/java/com/blockhost/
     ├── CommandAssist.java        Autocompletar e historial de la línea de comandos
     ├── ConnectionPane.java       Direcciones de conexión y apertura del puerto
     ├── ConnectionGuideDialog.java Guía para jugar con amigos de fuera
+    ├── PortsDialog.java          Ver, abrir, cerrar y comprobar puertos del router
     ├── ModsPane.java             Pestaña de mods o plugins (y actualizaciones)
     ├── PlayersPane.java          Pestaña de jugadores
     ├── BackupsPane.java          Pestaña de copias (y copias automáticas)

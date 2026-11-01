@@ -164,6 +164,39 @@ public final class Upnp {
                 {"NewProtocol", protocol}});
     }
 
+    /** Una apertura de puerto que tiene el router. */
+    public record Mapping(int externalPort, String protocol, String internalClient, int internalPort, boolean enabled,
+                          String description, int leaseSeconds) { }
+
+    /** Lista lo abierto en el router (GetGenericPortMappingEntry, de uno en uno hasta que no haya más). */
+    public static List<Mapping> listPortMappings(Gateway g) throws IOException {
+        List<Mapping> out = new ArrayList<>();
+        for (int i = 0; i < 256; i++) {
+            Document d;
+            try {
+                d = soap(g, "GetGenericPortMappingEntry", new String[][]{{"NewPortMappingIndex", String.valueOf(i)}});
+            } catch (UpnpException e) {
+                if (i == 0 && e.code != 713 && e.code != 714) throw e; // 713: no hay ninguna
+                break; // fin de la lista (cada router la termina con un error distinto)
+            }
+            out.add(new Mapping(num(firstText(d, "NewExternalPort")), trim(firstText(d, "NewProtocol")),
+                    trim(firstText(d, "NewInternalClient")), num(firstText(d, "NewInternalPort")),
+                    !"0".equals(trim(firstText(d, "NewEnabled"))), trim(firstText(d, "NewPortMappingDescription")),
+                    num(firstText(d, "NewLeaseDuration"))));
+        }
+        return out;
+    }
+
+    private static String trim(String s) { return s == null ? "" : s.trim(); }
+
+    private static int num(String s) {
+        try {
+            return Integer.parseInt(trim(s));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     /** A qué IP local apunta ya ese puerto en el router (null si no está abierto). */
     public static String mappedClient(Gateway g, int port, String protocol) throws IOException {
         try {
@@ -222,6 +255,7 @@ public final class Upnp {
     static String errorText(int code, String description) {
         String what = switch (code) {
             case 402, 606 -> "El router no deja cambiar puertos por UPnP (puede que esté limitado en sus ajustes).";
+            case 713 -> "No hay más puertos abiertos.";
             case 714 -> "Ese puerto no estaba abierto.";
             case 718 -> "El router ya tiene ese puerto abierto hacia otro equipo de tu red.";
             case 724 -> "El router exige que el puerto interno y el externo sean iguales.";
