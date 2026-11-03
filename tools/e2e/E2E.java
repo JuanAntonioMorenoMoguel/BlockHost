@@ -44,7 +44,8 @@ public class E2E {
         check("Autocompletar 'gam'", sug.stream().anyMatch(s->s.text().contains("gamemode")), sug);
         var sug2 = cc.suggest("kick St", Set.of("Steve"));
         check("Autocompletar jugador", sug2.stream().anyMatch(s->s.text().contains("Steve")), sug2);
-        check("Comando /tick existe en "+ver, cc.get("tick")!=null, null);
+        boolean hasTick = ServerProvider.VERSION_ORDER.compare(ver, "1.20.3") >= 0; // /tick llegó en 1.20.3
+        check("Comando /tick "+(hasTick?"existe":"no existe")+" en "+ver, (cc.get("tick")!=null)==hasTick, null);
         Path b = Backups.createWhileRunning(inst, p, Backups.MANUAL);
         check("Copia en caliente", Files.size(b)>1000, b.getFileName()+" "+Files.size(b)+" B");
         Path exp = WorldShare.export(inst, p, Files.createTempDirectory("exp").resolve(WorldShare.exportFileName(inst)));
