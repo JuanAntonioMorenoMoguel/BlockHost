@@ -98,8 +98,6 @@ gradlew.bat installer
 
 Genera `build\jpackage\BlockHost-0.2.0.exe`: un instalador normal de Windows (elegir carpeta, entrada en el menú Inicio, acceso directo en el escritorio y desinstalar desde «Aplicaciones»). Se instala para tu usuario, sin pedir permisos de administrador, y lleva su propio Java. Una versión nueva sustituye a la anterior sin tocar tus servidores. Necesita [WiX Toolset 3](https://github.com/wixtoolset/wix3/releases) instalado para generarlo.
 
-**Sin instalar nada**: cada push a `main` compila en GitHub Actions el instalador y la versión portable (`BlockHost-portable.zip`); se descargan desde la pestaña *Actions* → la ejecución → *Artifacts* → `BlockHost-Windows`. Al subir una etiqueta `v*` (p. ej. `v0.2.0`) se publican además como *Release*.
-
 ## Comandos
 
 ```bash
